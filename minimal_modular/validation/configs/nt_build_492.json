@@ -1,0 +1,407 @@
+{
+    "name": "NT_BUILD_492_Full_Validation",
+    "description": "Comprehensive validation config aligned to validation_logic.txt - covering all physics, schema, and statistical rules",
+    "filter_condition": null,
+    "paper_group_column": "Reference",
+    "metadata": {
+        "standard": "NT BUILD 492",
+        "version": "2.0",
+        "units_system": "SI",
+        "source": "validation_logic.txt"
+    },
+    "rules": [
+        {
+            "rule_id": "R_N1",
+            "name": "Dnssm Basic Validation",
+            "description": "Dnssm_x1e_12_m2_s numeric and > 0",
+            "scope": "row",
+            "severity": "error",
+            "condition": "validate_dnssm_range",
+            "columns": [
+                "Dnssm_x1e_12_m2_s"
+            ],
+            "parameters": {
+                "min_value": 0.0,
+                "max_value": 50.0
+            },
+            "enabled": true,
+            "flag_column": "rule_N1_dnssm_basic_pass"
+        },
+        {
+            "rule_id": "R_P1_water",
+            "name": "Water Content Non-Negative",
+            "description": "Water_kg_m3 numeric and >= 0",
+            "scope": "row",
+            "severity": "error",
+            "condition": "validate_range",
+            "columns": [
+                "Water_kg_m3"
+            ],
+            "parameters": {
+                "min_value": 0,
+                "max_value": 500
+            },
+            "enabled": true,
+            "flag_column": "rule_P1_water_pass"
+        },
+        {
+            "rule_id": "R_P1_cement",
+            "name": "Cement Content Non-Negative",
+            "description": "Cement_kg_m3 numeric and >= 0",
+            "scope": "row",
+            "severity": "error",
+            "condition": "validate_range",
+            "columns": [
+                "Cement_kg_m3"
+            ],
+            "parameters": {
+                "min_value": 0,
+                "max_value": 800
+            },
+            "enabled": true,
+            "flag_column": "rule_P1_cement_pass"
+        },
+        {
+            "rule_id": "R_P2",
+            "name": "Binder Total Validation",
+            "description": "Binder_total = Cement + Slag + Fly_ash + Silica_fume + Metakaolin + Limestone_powder; 200 <= Binder_total <= 800",
+            "scope": "row",
+            "severity": "error",
+            "condition": "validate_binder_total",
+            "columns": [
+                "Cement_kg_m3",
+                "Slag_GGBS_kg_m3",
+                "Fly_ash_kg_m3",
+                "Silica_fume_kg_m3",
+                "Metakaolin_kg_m3",
+                "Limestone_powder_kg_m3"
+            ],
+            "parameters": {
+                "min_total": 200,
+                "max_total": 800
+            },
+            "enabled": true,
+            "flag_column": "rule_P2_binder_pass"
+        },
+        {
+            "rule_id": "R_P3",
+            "name": "Aggregate Consistency",
+            "description": "Agg_calc = Fine + Coarse + Recycled; |Agg_calc - Total_agg| <= tolerance",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_aggregate_total",
+            "columns": [
+                "Fine_agg_kg_m3",
+                "Coarse_agg_kg_m3",
+                "Recycled_agg_kg_m3",
+                "Total_agg_kg_m3"
+            ],
+            "parameters": {
+                "tolerance_percent": 5
+            },
+            "enabled": true,
+            "flag_column": "rule_P3_agg_pass"
+        },
+        {
+            "rule_id": "R_P4",
+            "name": "w/b Ratio Consistency",
+            "description": "wb_calc = Water_kg_m3 / Binder_total; |wb_calc - w_b| <= tolerance",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_wb_ratio",
+            "columns": [
+                "Water_kg_m3",
+                "w_b"
+            ],
+            "parameters": {
+                "tolerance": 0.05
+            },
+            "enabled": true,
+            "flag_column": "rule_P4_wb_pass"
+        },
+        {
+            "rule_id": "R_P5",
+            "name": "Density Range Validation",
+            "description": "Fresh & Dry density in [1800, 2800], Fresh >= Dry > 0",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_density",
+            "columns": [
+                "Fresh_density_kg_m3",
+                "Dry_density_kg_m3"
+            ],
+            "parameters": {
+                "min_value": 1800,
+                "max_value": 2800
+            },
+            "enabled": true,
+            "flag_column": "rule_P5_density_pass"
+        },
+        {
+            "rule_id": "R_P6",
+            "name": "Compressive Strength Validation",
+            "description": "Strength in (0, 120] MPa",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Compressive_strength_MPa"
+            ],
+            "parameters": {
+                "min_value": 0,
+                "max_value": 120,
+                "min_exclusive": true
+            },
+            "enabled": true,
+            "flag_column": "rule_P6_strength_pass"
+        },
+        {
+            "rule_id": "R_P7",
+            "name": "Air Content Range",
+            "description": "0 <= Air_content_percent <= 20",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Air_content_percent"
+            ],
+            "parameters": {
+                "min_value": 0,
+                "max_value": 20
+            },
+            "enabled": true,
+            "flag_column": "rule_P7_air_pass"
+        },
+        {
+            "rule_id": "R_P8_slump",
+            "name": "Slump Range Validation",
+            "description": "0 <= Slump_mm <= 250",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Slump_mm"
+            ],
+            "parameters": {
+                "min_value": 0,
+                "max_value": 250
+            },
+            "enabled": true,
+            "flag_column": "rule_P8_slump_pass"
+        },
+        {
+            "rule_id": "R_P8_spread",
+            "name": "Spread Range Validation",
+            "description": "0 <= Spread_mm <= 800",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Spread_mm"
+            ],
+            "parameters": {
+                "min_value": 0,
+                "max_value": 800
+            },
+            "enabled": true,
+            "flag_column": "rule_P8_spread_pass"
+        },
+        {
+            "rule_id": "R_P9",
+            "name": "Concrete Age at Migration",
+            "description": "Concrete_age_at_migration_days >= 0; soft warning if < 7",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Concrete_age_at_migration_days"
+            ],
+            "parameters": {
+                "min_value": 0,
+                "max_value": 3650
+            },
+            "enabled": true,
+            "flag_column": "rule_P9_age_migration_pass"
+        },
+        {
+            "rule_id": "R_P10",
+            "name": "Specimen Size Validation",
+            "description": "Check specimen size is specified and parseable",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "check_not_empty",
+            "columns": [
+                "Size_of_specimen_mm"
+            ],
+            "parameters": {},
+            "enabled": true,
+            "flag_column": "rule_P10_size_pass"
+        },
+        {
+            "rule_id": "R_P11_curing",
+            "name": "Curing Temperature Range",
+            "description": "Curing temperature 5-40C (standard 20 +/- 2C)",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Curing_temperature_C"
+            ],
+            "parameters": {
+                "min_value": 5,
+                "max_value": 40
+            },
+            "enabled": true,
+            "flag_column": "rule_P11_curing_pass"
+        },
+        {
+            "rule_id": "R_P11_specimen",
+            "name": "Specimen Temperature Range",
+            "description": "Specimen temperature 20-25C",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Specimen_temperature_C"
+            ],
+            "parameters": {
+                "min_value": 18,
+                "max_value": 27
+            },
+            "enabled": true,
+            "flag_column": "rule_P11_specimen_pass"
+        },
+        {
+            "rule_id": "R_P12_nacl",
+            "name": "NaCl Concentration Validation",
+            "description": "NaCl 0-100% (typical 3-5%)",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Cathode_NaCl_mass_percent"
+            ],
+            "parameters": {
+                "min_value": 0,
+                "max_value": 100
+            },
+            "enabled": true,
+            "flag_column": "rule_P12_nacl_pass"
+        },
+        {
+            "rule_id": "R_P12_naoh",
+            "name": "NaOH Concentration Validation",
+            "description": "NaOH 0.1-1.0 M",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Anode_NaOH_M"
+            ],
+            "parameters": {
+                "min_value": 0.1,
+                "max_value": 1.0
+            },
+            "enabled": true,
+            "flag_column": "rule_P12_naoh_pass"
+        },
+        {
+            "rule_id": "R_P12_agno3",
+            "name": "Silver Nitrate Concentration Validation",
+            "description": "AgNO3 0.1-1.0 M",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Silver_nitrate_M"
+            ],
+            "parameters": {
+                "min_value": 0.1,
+                "max_value": 1.0
+            },
+            "enabled": true,
+            "flag_column": "rule_P12_agno3_pass"
+        },
+        {
+            "rule_id": "R_P13",
+            "name": "Volume Fraction Aggregate",
+            "description": "Volume_fraction_aggregate within [0, 1] or [0, 100]; typical 0.60-0.75",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_range",
+            "columns": [
+                "Volume_fraction_aggregate"
+            ],
+            "parameters": {
+                "min_value": 0,
+                "max_value": 1
+            },
+            "enabled": true,
+            "flag_column": "rule_P13_vfa_pass"
+        },
+        {
+            "rule_id": "R_P15",
+            "name": "Age Consistency",
+            "description": "Age_at_strength_test_days >= Concrete_age_at_migration_days",
+            "scope": "row",
+            "severity": "warning",
+            "condition": "validate_age_consistency",
+            "columns": [
+                "Age_at_strength_test_days",
+                "Concrete_age_at_migration_days"
+            ],
+            "parameters": {},
+            "enabled": true,
+            "flag_column": "rule_P15_age_pass"
+        },
+        {
+            "rule_id": "R_P16",
+            "name": "At Least One Binder Component",
+            "description": "At least one binder component > 0",
+            "scope": "row",
+            "severity": "error",
+            "condition": "validate_at_least_one_positive",
+            "columns": [
+                "Cement_kg_m3",
+                "Slag_GGBS_kg_m3",
+                "Fly_ash_kg_m3",
+                "Silica_fume_kg_m3",
+                "Metakaolin_kg_m3",
+                "Limestone_powder_kg_m3"
+            ],
+            "parameters": {},
+            "enabled": true,
+            "flag_column": "rule_P16_binder_pass"
+        }
+    ],
+    "paper_metrics": {
+        "constraint_pass_rate": {
+            "description": "mean(row_physics_ok)",
+            "threshold": 0.95
+        },
+        "completeness": {
+            "description": "Core field coverage",
+            "core_fields": [
+                "Concrete_age_at_migration_days",
+                "Size_of_specimen_mm",
+                "Dnssm_x1e_12_m2_s",
+                "Fresh_density_kg_m3",
+                "w_b"
+            ],
+            "threshold": 0.80
+        },
+        "eqi_threshold": 80
+    },
+    "acceptance_criteria": {
+        "paper_accept": {
+            "constraint_pass_rate_min": 0.95,
+            "completeness_min": 0.80,
+            "schema_valid_rate_min": 0.95,
+            "conflict_rate_max": 0.02,
+            "eqi_min": 80
+        },
+        "paper_reject": {
+            "eqi_max": 65
+        }
+    }
+}

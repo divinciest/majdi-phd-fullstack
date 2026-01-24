@@ -1,0 +1,60 @@
+
+==============================
+PLATFORM 
+
+our platform is used to collect Data in excel sheets
+
+it does web crawling and collects the data from diffrent web pages
+
+the user provides the file schema + a guidance prompt 
+
+the backenbd has a logic and a data processing pipeline that fills in the execel file based on the prompt 
+
+the user can then download the output file
+
+a session of web crawling is called a RUN
+========================
+
+
+========================
+EXTENSION
+
+why the extension is needed 
+
+our platform does alot of web crawling, it is at the risk of a ban because of security layers like cloudflare and captcha 
+this risk is much heigher when we use python or standard http library for crawling, or even a sophisticated automation browser like playright or crawl4ai
+the most safe option is to have a custom extension on the browser that acepts crawl jobs from the server and executes them
+
+meaning our extension is  doing the actual crawling and is navigating to website based on server demand
+it is operating as an automation of website visiting
+
+the server gets raw html from the extesion, the serevr calls thge exntesion only when it fails to crawl in stardard methods like http direct call
+the extesion can in the future be put inside a docker image/container to hide the browser from the server
+
+the extension may require human intervension sometimes, example to authenticate to a website before crawling it to gain access to pages the require authentication
+
+
+=========================
+
+
+ARCHITECTURE
+
+
+we have 4  main interacting components
+
+
+the frontend
+
+the server
+accepts requests from frontend and extension and orchestrates engines
+
+
+
+
+the engines
+the perform single data colelction, session 
+input = search keywords + list of lists
+output = excel sheet 
+
+the extension
+automates browser navigation for ccrawling toreduce the risk of anti bot ban

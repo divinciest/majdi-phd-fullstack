@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+
+# Large files and archives
+*.zip
+*.rar
+*.7z
+*.tar.gz
+*.tar
+
+# Cache and output
+cache/
+tests/
+test_output/
+exports/
+LWC_Majdi/
+LWC_Output_CSV/
+
+# Logs
+*.log
+
+# IDE
+.cursor/
+.vscode/
+.idea/
+
+# Node modules (frontend)
+node_modules/
+.next/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db

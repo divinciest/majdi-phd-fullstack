@@ -1,0 +1,109 @@
+{
+  "name": "NT_BUILD_492_Validation",
+  "description": "Validation config for NT_BUILD_492 scientific data extraction",
+  "filter_condition": "Test_method == 'NT_BUILD_492'",
+  "paper_group_column": "Reference",
+  "metadata": {},
+  "rules": [
+    {
+      "rule_id": "R_P1",
+      "name": "Kg/m\u00b3 columns validation",
+      "description": "All kg/m\u00b3 columns numeric and \u2265 0",
+      "scope": "row",
+      "severity": "error",
+      "condition": "validate_non_negative",
+      "columns": [
+        "Water_kg_m3",
+        "Cement_kg_m3",
+        "Slag_GGBS_kg_m3",
+        "Fly_ash_kg_m3",
+        "Silica_fume_kg_m3",
+        "Metakaolin_kg_m3",
+        "Limestone_powder_kg_m3",
+        "Fine_agg_kg_m3",
+        "Coarse_agg_kg_m3",
+        "Recycled_agg_kg_m3",
+        "Total_agg_kg_m3"
+      ],
+      "parameters": {},
+      "enabled": true,
+      "flag_column": "rule_P1_pass"
+    },
+    {
+      "rule_id": "R_P2",
+      "name": "Binder total validation",
+      "description": "Binder_total = Cement + Slag + Fly_ash + Silica_fume + Metakaolin + Limestone_powder; Binder_total > 0 and 200 \u2264 Binder_total \u2264 800",
+      "scope": "row",
+      "severity": "error",
+      "condition": "validate_binder_total",
+      "columns": [
+        "Cement_kg_m3",
+        "Slag_GGBS_kg_m3",
+        "Fly_ash_kg_m3",
+        "Silica_fume_kg_m3",
+        "Metakaolin_kg_m3",
+        "Limestone_powder_kg_m3"
+      ],
+      "parameters": {
+        "min_total": 200,
+        "max_total": 800
+      },
+      "enabled": true,
+      "flag_column": "rule_P2_binder_pass"
+    },
+    {
+      "rule_id": "R_N1",
+      "name": "Dnssm validation",
+      "description": "Dnssm_x1e_12_m2_s numeric and > 0",
+      "scope": "row",
+      "severity": "error",
+      "condition": "validate_positive",
+      "columns": [
+        "Dnssm_x1e_12_m2_s"
+      ],
+      "parameters": {},
+      "enabled": true,
+      "flag_column": "rule_N1_dnssm_basic_pass"
+    },
+    {
+      "rule_id": "R_S1",
+      "name": "Numeric columns validation",
+      "description": "Each numeric column is parseable as float",
+      "scope": "row",
+      "severity": "error",
+      "condition": "check_not_empty",
+      "columns": [
+        "Concrete_age_at_migration_days",
+        "Curing_temperature_C",
+        "Specimen_temperature_C",
+        "Dnssm_x1e_12_m2_s",
+        "Water_kg_m3",
+        "Cement_kg_m3",
+        "Slag_GGBS_kg_m3",
+        "Fly_ash_kg_m3",
+        "Silica_fume_kg_m3",
+        "Metakaolin_kg_m3",
+        "Limestone_powder_kg_m3",
+        "Fine_agg_kg_m3",
+        "Coarse_agg_kg_m3",
+        "Recycled_agg_kg_m3",
+        "Total_agg_kg_m3",
+        "w_b",
+        "Fresh_density_kg_m3",
+        "Dry_density_kg_m3",
+        "Air_content_percent",
+        "Slump_mm",
+        "Spread_mm",
+        "Compressive_strength_MPa",
+        "Age_at_strength_test_days",
+        "Cathode_NaCl_mass_percent",
+        "Anode_NaOH_M",
+        "Silver_nitrate_M",
+        "Volume_fraction_aggregate"
+      ],
+      "parameters": {},
+      "enabled": true,
+      "flag_column": "rule_S1_numeric"
+    }
+  ]
+}
