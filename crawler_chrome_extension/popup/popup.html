@@ -15,7 +15,13 @@
   <script defer src="popup.js?v=5"></script>
   </head>
 <body>
-  <div class="row"><strong>GatherGrid Crawler</strong></div>
+  <div class="row flex" style="justify-content: space-between; align-items: center;">
+    <strong>GatherGrid Crawler</strong>
+    <div class="flex" style="gap: 4px;">
+      <button id="pauseExtension" class="btn" style="font-size: 11px; padding: 4px 8px; background: #f39c12; color: white; border-color: #f39c12;">⏸️ Pause</button>
+      <button id="clearPendingTop" class="btn" style="font-size: 11px; padding: 4px 8px; background: #ff6b6b; color: white; border-color: #ff6b6b;">🗑️ Clear Pending</button>
+    </div>
+  </div>
 
   <div class="row">
     <label for="serverBaseUrl">Server Base URL</label>

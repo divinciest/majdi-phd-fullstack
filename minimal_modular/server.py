@@ -2156,46 +2156,74 @@ def create_run_from_search():
             conn2.commit()
             conn2.close()
             
-            log_message(f"Starting Gemini Deep Research for query: {query[:100]}...", "INFO", run_id)
+            log_message(f"Starting Gemini Deep Research for query: {query}", "INFO", run_id)
             
-            # Use Gemini REST API with Google Search grounding
-            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+            from cache_utils import get_gpt_cache, set_gpt_cache
             
-            payload = {
-                "contents": [{
-                    "parts": [{
-                        "text": query
+            # Check cache first
+            cache_model = "gemini-deep-research:gemini-2.0-flash"
+            cached_response = get_gpt_cache("", query, cache_model)
+            
+            if cached_response:
+                log_message(f"[CACHE HIT] Deep Research - using cached response", "INFO", run_id)
+                response = cached_response
+            else:
+                log_message(f"[CACHE MISS] Deep Research - calling Gemini API...", "INFO", run_id)
+                # Use Gemini REST API with Google Search grounding
+                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+                
+                payload = {
+                    "contents": [{
+                        "parts": [{
+                            "text": query
+                        }]
+                    }],
+                    "tools": [{
+                        "google_search": {}
                     }]
-                }],
-                "tools": [{
-                    "google_search": {}
-                }]
-            }
-            
-            resp = requests.post(
-                gemini_url,
-                headers={"Content-Type": "application/json"},
-                json=payload,
-                timeout=120
-            )
-            resp.raise_for_status()
-            response = resp.json()
+                }
+                
+                log_message(f"Gemini API request payload: {json.dumps(payload)[:500]}", "DEBUG", run_id)
+                
+                resp = requests.post(
+                    gemini_url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                    timeout=120
+                )
+                resp.raise_for_status()
+                response = resp.json()
+                
+                # Cache the response
+                set_gpt_cache("", query, cache_model, response)
+                log_message(f"[CACHE STORED] Deep Research response cached", "INFO", run_id)
             
             result_text = ""
             extracted_links = []
             
+            # Log response structure for debugging
+            log_message(f"Response keys: {list(response.keys())}", "DEBUG", run_id)
+            if "candidates" in response:
+                log_message(f"Candidates count: {len(response['candidates'])}", "DEBUG", run_id)
+            
             # Extract text and links from response
             if "candidates" in response:
-                for candidate in response["candidates"]:
+                for idx, candidate in enumerate(response["candidates"]):
                     content = candidate.get("content", {})
                     parts = content.get("parts", [])
+                    log_message(f"Candidate {idx}: {len(parts)} parts, keys: {list(candidate.keys())}", "DEBUG", run_id)
+                    
                     for part in parts:
                         if "text" in part:
                             result_text += part["text"] + "\n"
                     
                     # Extract links from grounding metadata
                     grounding_metadata = candidate.get("groundingMetadata", {})
+                    log_message(f"Grounding metadata keys: {list(grounding_metadata.keys())}", "DEBUG", run_id)
+                    
                     grounding_chunks = grounding_metadata.get("groundingChunks", [])
+                    log_message(f"Grounding chunks count: {len(grounding_chunks)}", "DEBUG", run_id)
+                    
                     for chunk in grounding_chunks:
                         web = chunk.get("web", {})
                         url = web.get("uri", "") or web.get("url", "")
@@ -2205,6 +2233,8 @@ def create_run_from_search():
                     
                     # Also check groundingSupports for additional URLs
                     grounding_supports = grounding_metadata.get("groundingSupports", [])
+                    log_message(f"Grounding supports count: {len(grounding_supports)}", "DEBUG", run_id)
+                    
                     for support in grounding_supports:
                         for chunk_idx in support.get("groundingChunkIndices", []):
                             if chunk_idx < len(grounding_chunks):
@@ -2212,11 +2242,23 @@ def create_run_from_search():
                                 url = web.get("uri", "") or web.get("url", "")
                                 if url and not any(l["url"] == url for l in extracted_links):
                                     extracted_links.append({"url": url, "title": web.get("title", "")})
+                    
+                    # Check for search entry point if no grounding chunks
+                    search_entry_point = grounding_metadata.get("searchEntryPoint", {})
+                    if search_entry_point:
+                        log_message(f"Search entry point: {json.dumps(search_entry_point)[:200]}", "DEBUG", run_id)
+            
+            log_message(f"Links from grounding metadata: {len(extracted_links)}", "DEBUG", run_id)
+            log_message(f"Result text length: {len(result_text)} chars", "DEBUG", run_id)
+            if result_text:
+                log_message(f"Result text preview: {result_text[:500]}...", "DEBUG", run_id)
             
             # Fallback: extract URLs from text if no grounding metadata
             if not extracted_links and result_text:
+                log_message(f"No grounding links found, extracting URLs from text...", "INFO", run_id)
                 url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
                 urls = re.findall(url_pattern, result_text)
+                log_message(f"URLs found in text: {len(urls)}", "DEBUG", run_id)
                 for url in urls[:50]:  # Limit to 50 links
                     extracted_links.append({"url": url, "title": ""})
             
@@ -3022,6 +3064,39 @@ def start_run(run_id):
         return jsonify({"message": "PDF extraction started", "runId": run_id, "sourceType": "pdf"}), 202
 
 
+def normalize_retry_name(name: str) -> str:
+    """Normalize run name to use (Retry N) format instead of repeated (Retry).
+    
+    Handles:
+    - "Run Name (Retry) (Retry) (Retry)" -> "Run Name (Retry 3)"
+    - "Run Name (Retry 5)" -> "Run Name (Retry 6)"
+    - "Run Name" -> "Run Name (Retry 1)"
+    
+    Always stores in correct format, even if input is wrong format.
+    """
+    if not name:
+        name = "Untitled Run"
+    
+    # Pattern 1: Count repeated (Retry) at the end
+    repeated_pattern = r'^(.+?)((?:\s*\(Retry\))+)\s*$'
+    match = re.match(repeated_pattern, name)
+    if match:
+        base_name = match.group(1).strip()
+        retry_count = match.group(2).count('(Retry)')
+        return f"{base_name} (Retry {retry_count + 1})"
+    
+    # Pattern 2: Already has (Retry N) format
+    numbered_pattern = r'^(.+?)\s*\(Retry\s+(\d+)\)\s*$'
+    match = re.match(numbered_pattern, name)
+    if match:
+        base_name = match.group(1).strip()
+        current_count = int(match.group(2))
+        return f"{base_name} (Retry {current_count + 1})"
+    
+    # No retry suffix - this is the first retry
+    return f"{name} (Retry 1)"
+
+
 @app.route("/runs/<run_id>/retry", methods=["POST"])
 @require_auth
 def retry_run(run_id):
@@ -3082,7 +3157,7 @@ def retry_run(run_id):
     llm_provider = src.get("llm_provider") or LLM_PROVIDER
     prompt = src.get("prompt") or ""
     enable_row_counting = 1 if bool(src.get("enable_row_counting", 0)) else 0
-    name = (src.get("name") or "Untitled Run") + " (Retry)"
+    name = normalize_retry_name(src.get("name") or "Untitled Run")
 
     if source_type == "pdf":
         if not src_pdfs_dir or not os.path.isdir(src_pdfs_dir):
@@ -3290,6 +3365,7 @@ def retry_run(run_id):
             try:
                 import requests
                 import re
+                from cache_utils import get_gpt_cache, set_gpt_cache
 
                 conn2 = get_db()
                 cur2 = conn2.cursor()
@@ -3297,38 +3373,101 @@ def retry_run(run_id):
                 conn2.commit()
                 conn2.close()
 
-                log_message(f"Starting Gemini Deep Research for query: {query[:100]}...", "INFO", new_run_id)
+                log_message(f"Starting Gemini Deep Research for query: {query}", "INFO", new_run_id)
 
-                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-                payload = {
-                    "contents": [{"parts": [{"text": query}]}],
-                    "tools": [{"google_search": {}}],
-                }
-                resp = requests.post(gemini_url, json=payload, timeout=300)
-                resp.raise_for_status()
-                data = resp.json()
+                # Check cache first
+                cache_model = "gemini-deep-research:gemini-2.0-flash"
+                cached_response = get_gpt_cache("", query, cache_model)
+                
+                if cached_response:
+                    log_message(f"[CACHE HIT] Deep Research - using cached response", "INFO", new_run_id)
+                    data = cached_response
+                else:
+                    log_message(f"[CACHE MISS] Deep Research - calling Gemini API...", "INFO", new_run_id)
+                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+                    payload = {
+                        "contents": [{"parts": [{"text": query}]}],
+                        "tools": [{"google_search": {}}],
+                    }
+                    resp = requests.post(gemini_url, json=payload, timeout=300)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    
+                    # Cache the response
+                    set_gpt_cache("", query, cache_model, data)
+                    log_message(f"[CACHE STORED] Deep Research response cached", "INFO", new_run_id)
 
-                text = ""
-                try:
-                    text = data["candidates"][0]["content"]["parts"][0]["text"]
-                except Exception:
-                    text = json.dumps(data)
-
-                urls = re.findall(r"https?://[^\s\]\)\"']+", text)
-                urls = list(dict.fromkeys(urls))
+                # Log response structure
+                log_message(f"Response keys: {list(data.keys())}", "DEBUG", new_run_id)
+                
+                # Extract text and links from grounding metadata (same as main function)
+                result_text = ""
+                extracted_links = []
+                
+                if "candidates" in data:
+                    log_message(f"Candidates count: {len(data['candidates'])}", "DEBUG", new_run_id)
+                    for idx, candidate in enumerate(data["candidates"]):
+                        content = candidate.get("content", {})
+                        parts = content.get("parts", [])
+                        log_message(f"Candidate {idx}: {len(parts)} parts, keys: {list(candidate.keys())}", "DEBUG", new_run_id)
+                        
+                        for part in parts:
+                            if "text" in part:
+                                result_text += part["text"] + "\n"
+                        
+                        # Extract links from grounding metadata
+                        grounding_metadata = candidate.get("groundingMetadata", {})
+                        log_message(f"Grounding metadata keys: {list(grounding_metadata.keys())}", "DEBUG", new_run_id)
+                        
+                        grounding_chunks = grounding_metadata.get("groundingChunks", [])
+                        log_message(f"Grounding chunks count: {len(grounding_chunks)}", "DEBUG", new_run_id)
+                        
+                        for chunk in grounding_chunks:
+                            web = chunk.get("web", {})
+                            url = web.get("uri", "") or web.get("url", "")
+                            title = web.get("title", "")
+                            if url:
+                                extracted_links.append({"url": url, "title": title})
+                
+                log_message(f"Links from grounding metadata: {len(extracted_links)}", "DEBUG", new_run_id)
+                log_message(f"Result text length: {len(result_text)} chars", "DEBUG", new_run_id)
+                if result_text:
+                    log_message(f"Result text preview: {result_text[:500]}...", "DEBUG", new_run_id)
+                
+                # Fallback: extract URLs from text if no grounding metadata
+                if not extracted_links and result_text:
+                    log_message(f"No grounding links found, extracting URLs from text...", "INFO", new_run_id)
+                    urls = re.findall(r"https?://[^\s\]\)\"']+", result_text)
+                    urls = list(dict.fromkeys(urls))
+                    log_message(f"URLs found in text: {len(urls)}", "DEBUG", new_run_id)
+                    for url in urls[:50]:
+                        extracted_links.append({"url": url, "title": ""})
+                
+                # Deduplicate
+                seen_urls = set()
+                unique_links = []
+                for link in extracted_links:
+                    url = link.get("url", "")
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        unique_links.append(link)
+                
+                log_message(f"Found {len(unique_links)} unique URLs from Deep Research", "INFO", new_run_id)
 
                 conn3 = get_db()
                 cur3 = conn3.cursor()
-                cur3.execute("UPDATE runs SET deep_research_result = ?, status = 'crawling', sources_count = ? WHERE id = ?", (text, len(urls), new_run_id))
+                cur3.execute("UPDATE runs SET deep_research_result = ?, status = 'crawling', sources_count = ? WHERE id = ?", (result_text, len(unique_links), new_run_id))
 
-                for url in urls:
+                for link in unique_links:
+                    url = link.get("url", "")
+                    title = link.get("title", "")
                     job_id = str(uuid.uuid4())
                     cur3.execute(
                         """
                         INSERT INTO crawl_jobs (id, run_id, user_id, url, title, status, created_at)
-                        VALUES (?, ?, ?, ?, '', 'PENDING', ?)
+                        VALUES (?, ?, ?, ?, ?, 'PENDING', ?)
                         """,
-                        (job_id, new_run_id, user_id, url, now),
+                        (job_id, new_run_id, user_id, url, title, now),
                     )
                     # Insert source row
                     ensure_source_row(
@@ -3337,7 +3476,7 @@ def retry_run(run_id):
                         source_type="link",
                         status="PENDING",
                         url=url,
-                        title="",
+                        title=title,
                         crawl_job_id=job_id,
                         pdf_file_id=None,
                         meta_source_id=None,
@@ -3345,6 +3484,8 @@ def retry_run(run_id):
                     )
                 conn3.commit()
                 conn3.close()
+                
+                log_message(f"Created {len(unique_links)} crawl jobs for extension to process", "SUCCESS", new_run_id)
             except Exception as e:
                 conn4 = get_db()
                 cur4 = conn4.cursor()
@@ -5699,6 +5840,142 @@ def reset_all_crawl_jobs():
     return jsonify({"status": "ok", "resetCount": reset_count})
 
 
+@app.route("/runs/<run_id>/skip-crawling", methods=["POST"])
+@require_auth
+def skip_crawling(run_id):
+    """Skip remaining crawl jobs and proceed with extraction.
+    
+    Marks all PENDING/CLAIMED/PDF_PENDING jobs as SKIPPED and updates
+    corresponding sources. Sets run status to 'waiting' so extraction can start.
+    """
+    user_id = g.current_user["id"]
+    
+    conn = get_db()
+    cur = conn.cursor()
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    # Verify run belongs to user
+    cur.execute("SELECT id, status FROM runs WHERE id = ? AND user_id = ?", (run_id, user_id))
+    run = cur.fetchone()
+    if not run:
+        conn.close()
+        return jsonify({"error": "Run not found"}), 404
+    
+    # Mark all pending crawl jobs as SKIPPED
+    cur.execute("""
+        UPDATE crawl_jobs 
+        SET status = 'SKIPPED', completed_at = ?, error = 'Skipped by user'
+        WHERE run_id = ? AND user_id = ? AND status IN ('PENDING', 'CLAIMED', 'PDF_PENDING')
+    """, (now, run_id, user_id))
+    skipped_jobs = cur.rowcount
+    
+    # Update corresponding sources to SKIPPED
+    cur.execute("""
+        UPDATE sources 
+        SET status = 'SKIPPED', error = 'Skipped by user', updated_at = ?
+        WHERE run_id = ? AND status IN ('PENDING', 'PDF_PENDING')
+    """, (now, run_id))
+    skipped_sources = cur.rowcount
+    
+    # Update run status to 'waiting' (ready for extraction)
+    cur.execute("UPDATE runs SET status = 'waiting' WHERE id = ?", (run_id,))
+    
+    conn.commit()
+    conn.close()
+    
+    log_message(f"Crawling skipped: {skipped_jobs} jobs, {skipped_sources} sources marked as SKIPPED", "INFO", run_id)
+    
+    return jsonify({
+        "status": "ok",
+        "skippedJobs": skipped_jobs,
+        "skippedSources": skipped_sources,
+        "runStatus": "waiting"
+    })
+
+
+@app.route("/crawl/queue/stats", methods=["GET"])
+@require_auth
+def get_queue_stats():
+    """Get crawl job queue statistics for the user."""
+    user_id = g.current_user["id"]
+    
+    conn = get_db()
+    cur = conn.cursor()
+    
+    cur.execute("""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status = 'CLAIMED' THEN 1 ELSE 0 END) as claimed,
+            SUM(CASE WHEN status = 'DONE' THEN 1 ELSE 0 END) as done,
+            SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN status = 'SKIPPED' THEN 1 ELSE 0 END) as skipped,
+            SUM(CASE WHEN status = 'PDF_PENDING' THEN 1 ELSE 0 END) as pdf_pending
+        FROM crawl_jobs 
+        WHERE user_id = ?
+    """, (user_id,))
+    
+    row = cur.fetchone()
+    conn.close()
+    
+    return jsonify({
+        "total": row["total"] or 0,
+        "pending": row["pending"] or 0,
+        "claimed": row["claimed"] or 0,
+        "done": row["done"] or 0,
+        "failed": row["failed"] or 0,
+        "skipped": row["skipped"] or 0,
+        "pdfPending": row["pdf_pending"] or 0
+    })
+
+
+@app.route("/crawl/queue/clear", methods=["POST"])
+@require_auth
+def clear_queue():
+    """Clear crawl jobs from the queue.
+    
+    Body options:
+    - { "status": "PENDING" } - clear only jobs with specific status
+    - { "clearAll": true } - clear all jobs for user
+    """
+    user_id = g.current_user["id"]
+    data = request.json or {}
+    status_filter = data.get("status")
+    clear_all = data.get("clearAll", False)
+    
+    conn = get_db()
+    cur = conn.cursor()
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    if clear_all:
+        # Delete all jobs for user
+        cur.execute("SELECT COUNT(*) FROM crawl_jobs WHERE user_id = ?", (user_id,))
+        total = cur.fetchone()[0]
+        cur.execute("DELETE FROM crawl_jobs WHERE user_id = ?", (user_id,))
+        cleared = cur.rowcount
+    elif status_filter:
+        # Delete jobs with specific status
+        cur.execute("SELECT COUNT(*) FROM crawl_jobs WHERE user_id = ? AND status = ?", (user_id, status_filter))
+        total = cur.fetchone()[0]
+        cur.execute("DELETE FROM crawl_jobs WHERE user_id = ? AND status = ?", (user_id, status_filter))
+        cleared = cur.rowcount
+    else:
+        conn.close()
+        return jsonify({"error": "Specify 'status' or 'clearAll'"}), 400
+    
+    # Get remaining count
+    cur.execute("SELECT COUNT(*) FROM crawl_jobs WHERE user_id = ?", (user_id,))
+    remaining = cur.fetchone()[0]
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        "cleared": cleared,
+        "remaining": remaining
+    })
+
+
 @app.route("/crawl/jobs/fix-run-ids", methods=["POST"])
 @require_auth
 def fix_crawl_job_run_ids():
@@ -6020,8 +6297,224 @@ def submit_crawl_result():
             conn.close()
 
 
-# NOTE: /crawl/result/pdf endpoint removed - PDFs are now downloaded server-side
-# See process_pdf_job() function for server-side PDF processing
+@app.route("/crawl/result/pdf", methods=["POST"])
+@require_auth
+def submit_crawl_result_pdf():
+    """Receive PDF URL from extension - server downloads and processes the PDF.
+    
+    When extension detects a PDF (by content-type or URL), it submits the URL here
+    instead of trying to extract HTML. Server downloads the PDF and processes it.
+    """
+    user_id = g.current_user["id"]
+    data = request.json or {}
+    job_id = data.get("jobId")
+    pdf_url = data.get("url") or data.get("pdfUrl")
+    
+    if not job_id:
+        return jsonify({"error": "jobId required"}), 400
+    if not pdf_url:
+        return jsonify({"error": "url required"}), 400
+    
+    conn = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        
+        # Verify job belongs to user
+        cur.execute("SELECT id, url, run_id, title FROM crawl_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+        job = cur.fetchone()
+        
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        
+        run_id = job["run_id"]
+        title = job["title"] or "PDF Document"
+        
+        # Mark job as PDF_PENDING for server-side download
+        cur.execute("""
+            UPDATE crawl_jobs 
+            SET status = 'PDF_PENDING', url = ?
+            WHERE id = ?
+        """, (pdf_url, job_id))
+        
+        # Update source to PDF type
+        cur.execute("""
+            UPDATE sources
+            SET source_type = 'pdf', status = 'PDF_PENDING', url = ?, updated_at = ?
+            WHERE id = ?
+        """, (pdf_url, now, job_id))
+        
+        conn.commit()
+        
+        log_message(f"PDF URL received for job {job_id}: {pdf_url[:100]}...", "INFO", run_id)
+        
+        # Start background download for this single PDF
+        def download_single_pdf():
+            import requests as req
+            conn2 = None
+            try:
+                conn2 = get_db()
+                cur2 = conn2.cursor()
+                
+                log_message(f"Downloading PDF: {pdf_url[:100]}...", "INFO", run_id)
+                
+                response = req.get(pdf_url, timeout=120, stream=True, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+                response.raise_for_status()
+                
+                # Save PDF
+                pdf_id = str(uuid.uuid4())
+                pdf_filename = f"{pdf_id}.pdf"
+                run_upload_dir = os.path.join(UPLOAD_FOLDER, run_id)
+                pdfs_dir = os.path.join(run_upload_dir, "pdfs")
+                os.makedirs(pdfs_dir, exist_ok=True)
+                pdf_path = os.path.join(pdfs_dir, pdf_filename)
+                
+                with open(pdf_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                pdf_size = os.path.getsize(pdf_path)
+                dl_now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                
+                # Register file
+                cur2.execute("""
+                    INSERT INTO files (id, filename, original_name, mime_type, size_bytes, file_type, run_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (pdf_id, pdf_filename, title + ".pdf", "application/pdf", pdf_size, "pdf", run_id, dl_now))
+                
+                # Update job status
+                cur2.execute("""
+                    UPDATE crawl_jobs 
+                    SET status = 'DONE', pdf_path = ?, completed_at = ?, error = NULL
+                    WHERE id = ?
+                """, (pdf_path, dl_now, job_id))
+                
+                # Update source with PDF file reference
+                cur2.execute("""
+                    UPDATE sources
+                    SET pdf_file_id = ?, status = 'READY', updated_at = ?
+                    WHERE id = ?
+                """, (pdf_id, dl_now, job_id))
+                
+                conn2.commit()
+                log_message(f"PDF downloaded: {pdf_size} bytes", "SUCCESS", run_id)
+                
+                # Check if all jobs complete
+                check_and_update_run_crawl_status(conn2, run_id, user_id)
+                
+            except Exception as e:
+                log_message(f"PDF download failed: {str(e)}", "ERROR", run_id)
+                if conn2:
+                    cur2 = conn2.cursor()
+                    cur2.execute("UPDATE crawl_jobs SET status = 'FAILED', error = ? WHERE id = ?", (str(e), job_id))
+                    cur2.execute("UPDATE sources SET status = 'FAILED', error = ? WHERE id = ?", (str(e), job_id))
+                    conn2.commit()
+            finally:
+                if conn2:
+                    conn2.close()
+        
+        import threading
+        threading.Thread(target=download_single_pdf, daemon=True).start()
+        
+        return jsonify({"status": "PDF_PENDING", "jobId": job_id, "message": "PDF download started"})
+    except Exception as e:
+        log_message(f"Error in submit_crawl_result_pdf: {str(e)}", "ERROR")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route("/crawl/result/pdf-binary", methods=["POST"])
+@require_auth
+def submit_crawl_result_pdf_binary():
+    """Receive PDF binary content directly from extension.
+    
+    Extension fetches the PDF binary and uploads it here, avoiding browser downloads.
+    Expects multipart form data with:
+    - jobId: the crawl job ID
+    - pdfFile: the PDF binary file
+    - url: original PDF URL (optional, for logging)
+    """
+    user_id = g.current_user["id"]
+    job_id = request.form.get("jobId")
+    pdf_url = request.form.get("url", "")
+    
+    if not job_id:
+        return jsonify({"error": "jobId required"}), 400
+    
+    if "pdfFile" not in request.files:
+        return jsonify({"error": "pdfFile required"}), 400
+    
+    pdf_file = request.files["pdfFile"]
+    
+    conn = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        
+        # Verify job belongs to user
+        cur.execute("SELECT id, url, run_id, title FROM crawl_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+        job = cur.fetchone()
+        
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        
+        run_id = job["run_id"]
+        title = job["title"] or "PDF Document"
+        original_url = pdf_url or job["url"]
+        
+        log_message(f"Receiving PDF binary for job {job_id} ({len(pdf_file.read())} bytes)", "INFO", run_id)
+        pdf_file.seek(0)  # Reset after reading length
+        
+        # Save PDF
+        pdf_id = str(uuid.uuid4())
+        pdf_filename = f"{pdf_id}.pdf"
+        run_upload_dir = os.path.join(UPLOAD_FOLDER, run_id)
+        pdfs_dir = os.path.join(run_upload_dir, "pdfs")
+        os.makedirs(pdfs_dir, exist_ok=True)
+        pdf_path = os.path.join(pdfs_dir, pdf_filename)
+        
+        pdf_file.save(pdf_path)
+        pdf_size = os.path.getsize(pdf_path)
+        
+        # Register file
+        cur.execute("""
+            INSERT INTO files (id, filename, original_name, mime_type, size_bytes, file_type, run_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (pdf_id, pdf_filename, title + ".pdf", "application/pdf", pdf_size, "pdf", run_id, now))
+        
+        # Update job status to DONE
+        cur.execute("""
+            UPDATE crawl_jobs 
+            SET status = 'DONE', pdf_path = ?, completed_at = ?, error = NULL
+            WHERE id = ?
+        """, (pdf_path, now, job_id))
+        
+        # Update source with PDF file reference
+        cur.execute("""
+            UPDATE sources
+            SET pdf_file_id = ?, source_type = 'pdf', status = 'READY', url = ?, updated_at = ?
+            WHERE id = ?
+        """, (pdf_id, original_url, now, job_id))
+        
+        conn.commit()
+        log_message(f"PDF received and saved: {pdf_size} bytes from extension", "SUCCESS", run_id)
+        
+        # Check if all jobs complete
+        check_and_update_run_crawl_status(conn, run_id, user_id)
+        
+        return jsonify({"status": "DONE", "jobId": job_id, "fileId": pdf_id, "size": pdf_size})
+    except Exception as e:
+        log_message(f"Error in submit_crawl_result_pdf_binary: {str(e)}", "ERROR")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.route("/runs/<run_id>/logs/append", methods=["POST"])

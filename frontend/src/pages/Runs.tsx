@@ -21,7 +21,11 @@ import {
   Filter,
   Plus,
   FileArchive,
-  Globe
+  Globe,
+  Activity,
+  CheckCircle,
+  AlertCircle,
+  Clock
 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useAppDispatch, useAppSelector } from "@/hooks/store"
@@ -30,6 +34,7 @@ import { useNavigate } from "react-router-dom"
 import { toast } from "@/hooks/use-toast"
 import { RunsAPI } from "@/features/runs/api"
 import { formatCreatedAt } from "@/lib/datetime"
+import { normalizeRetryName } from "@/lib/utils"
 import { Switch } from "@/components/ui/switch"
 
 type Run = {
@@ -84,8 +89,23 @@ export default function Runs() {
       case "waiting": return "secondary"
       case "searching": return "info"
       case "researching": return "info"
-      case "crawling": return "info"
+      case "crawling": return "warning"
       default: return "secondary"
+    }
+  }
+
+  const getStatusIcon = (status: Run["status"]) => {
+    switch (status) {
+      case "running": return <Activity className="h-3 w-3 animate-pulse" />
+      case "completed": return <CheckCircle className="h-3 w-3" />
+      case "paused": return <Pause className="h-3 w-3" />
+      case "failed": return <AlertCircle className="h-3 w-3" />
+      case "aborted": return <AlertCircle className="h-3 w-3" />
+      case "waiting": return <Clock className="h-3 w-3" />
+      case "searching": return <Search className="h-3 w-3 animate-pulse" />
+      case "researching": return <Globe className="h-3 w-3 animate-pulse" />
+      case "crawling": return <Download className="h-3 w-3 animate-pulse" />
+      default: return <Clock className="h-3 w-3" />
     }
   }
 
@@ -226,7 +246,7 @@ export default function Runs() {
                       </TableCell>
                       <TableCell className="font-medium">
                         <div>
-                          <div>{run.name}</div>
+                          <div>{normalizeRetryName(run.name)}</div>
                           <div className="text-xs text-muted-foreground">ID: {run.id}</div>
                         </div>
                       </TableCell>
@@ -242,7 +262,8 @@ export default function Runs() {
                         })()}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getStatusVariant(run.status)}>
+                        <Badge variant={getStatusVariant(run.status)} className="flex items-center gap-1 w-fit">
+                          {getStatusIcon(run.status)}
                           {run.status}
                         </Badge>
                       </TableCell>

@@ -198,6 +198,70 @@ async function togglePolling() {
   const enabled = document.getElementById('polling-toggle').checked;
   await setConfig({ pollingEnabled: enabled });
   document.getElementById('polling-status').textContent = enabled ? 'Enabled' : 'Disabled';
+  updatePauseButton();
+}
+
+async function updatePauseButton() {
+  const cfg = await getConfig();
+  const btn = document.getElementById('pause-extension-btn');
+  if (!btn) return;
+  
+  if (cfg.pollingEnabled) {
+    btn.textContent = '⏸️ Pause Extension';
+    btn.className = 'btn btn-warning';
+  } else {
+    btn.textContent = '▶️ Resume Extension';
+    btn.className = 'btn btn-success';
+  }
+}
+
+async function pauseExtension() {
+  const cfg = await getConfig();
+  const newState = !cfg.pollingEnabled;
+  await setConfig({ pollingEnabled: newState });
+  document.getElementById('polling-toggle').checked = newState;
+  document.getElementById('polling-status').textContent = newState ? 'Enabled' : 'Disabled';
+  updatePauseButton();
+}
+
+async function clearPendingJobs() {
+  if (!confirm('Clear all pending crawl jobs? This cannot be undone.')) {
+    return;
+  }
+  
+  const btn = document.getElementById('clear-pending-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Clearing...';
+  
+  try {
+    const cfg = await getConfig();
+    const auth = await getAuth();
+    
+    const resp = await fetch(`${cfg.serverBaseUrl}/crawl/queue/clear`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${auth.authToken}`
+      },
+      body: JSON.stringify({ status: 'PENDING' })
+    });
+    
+    if (resp.ok) {
+      const data = await resp.json();
+      btn.textContent = `✓ Cleared ${data.cleared}`;
+      await refreshStatus();
+    } else {
+      btn.textContent = '✗ Failed';
+    }
+  } catch (e) {
+    console.error('[dashboard] Clear pending error:', e);
+    btn.textContent = '✗ Error';
+  }
+  
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = '🗑️ Clear Pending';
+  }, 2000);
 }
 
 async function logout() {
@@ -229,6 +293,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('poll-now-btn').addEventListener('click', pollNow);
   document.getElementById('test-server-btn').addEventListener('click', testServer);
   document.getElementById('polling-toggle').addEventListener('change', togglePolling);
+  document.getElementById('pause-extension-btn').addEventListener('click', pauseExtension);
+  document.getElementById('clear-pending-btn').addEventListener('click', clearPendingJobs);
+  
+  // Update pause button state
+  updatePauseButton();
   
   // Periodic refresh
   setInterval(refreshStatus, 5000);

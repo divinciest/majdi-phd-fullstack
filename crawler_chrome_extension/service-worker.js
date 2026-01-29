@@ -1308,6 +1308,54 @@ async function handleJob(cfg, job) {
     await logActivity('DOMAIN', `Auto-approved domain "${domain}" in handleJob`);
   }
   
+  // PRE-EMPTIVE PDF DETECTION: Check if URL is a PDF BEFORE opening tab to avoid browser downloads
+  const urlLower = targetUrl.toLowerCase();
+  const isPdfByUrl = urlLower.endsWith('.pdf') || 
+                     urlLower.includes('/pdf/') || 
+                     urlLower.includes('.pdf?') || 
+                     urlLower.includes('pdf=') || 
+                     urlLower.includes('type=pdf');
+  
+  if (isPdfByUrl) {
+    console.log('[gg-sw] PDF detected by URL pattern - fetching directly without opening tab', { jobId: job.jobId, url: targetUrl.substring(0, 100) });
+    await logActivity('INFO', `PDF detected by URL - fetching directly`, { jobId: job.jobId, url: targetUrl.substring(0, 100) });
+    await logToServer(job.run_id, 'INFO', 'PDF detected by URL pattern - fetching directly without opening tab', { jobId: job.jobId, url: targetUrl.substring(0, 100) });
+    
+    try {
+      await postResultPdf(cfg, job.jobId, targetUrl, job.run_id);
+      await logActivity('SUCCESS', `PDF fetched and uploaded for job ${job.jobId}`, { url: targetUrl.substring(0, 100) });
+      return; // Done - no need to open tab
+    } catch (pdfErr) {
+      console.error('[gg-sw] Pre-emptive PDF fetch failed', pdfErr);
+      await logActivity('ERROR', `Pre-emptive PDF fetch failed: ${pdfErr.message}`, { jobId: job.jobId });
+      // Continue to open tab as fallback - maybe it's not actually a PDF
+    }
+  }
+  
+  // Check Content-Type via HEAD request before opening tab
+  try {
+    const headResp = await fetch(targetUrl, { method: 'HEAD', redirect: 'follow' });
+    const contentType = headResp.headers.get('content-type') || '';
+    
+    if (contentType.toLowerCase().includes('application/pdf')) {
+      console.log('[gg-sw] PDF detected by Content-Type - fetching directly without opening tab', { jobId: job.jobId, contentType });
+      await logActivity('INFO', `PDF detected by Content-Type - fetching directly`, { jobId: job.jobId, contentType });
+      await logToServer(job.run_id, 'INFO', 'PDF detected by Content-Type - fetching directly without opening tab', { jobId: job.jobId, contentType });
+      
+      try {
+        await postResultPdf(cfg, job.jobId, targetUrl, job.run_id);
+        await logActivity('SUCCESS', `PDF fetched and uploaded for job ${job.jobId}`, { url: targetUrl.substring(0, 100) });
+        return; // Done - no need to open tab
+      } catch (pdfErr) {
+        console.error('[gg-sw] PDF fetch after HEAD check failed', pdfErr);
+        await logActivity('ERROR', `PDF fetch failed: ${pdfErr.message}`, { jobId: job.jobId });
+        // Continue to open tab as fallback
+      }
+    }
+  } catch (headErr) {
+    console.log('[gg-sw] HEAD request failed (non-fatal), will open tab', { error: String(headErr) });
+  }
+  
   const tabId = await openOrCreateTab(targetUrl);
   console.log('[gg-sw] tab created', { tabId, url: targetUrl });
   await logToServer(job.run_id, 'INFO', 'Tab created for job', { jobId: job.jobId, tabId, url: targetUrl, domain });
@@ -1318,25 +1366,33 @@ async function handleJob(cfg, job) {
   const hist = { kind: 'server', jobId: job && job.jobId, url: targetUrl, domain, ts: Date.now(), phases: {}, status: 'begin' };
   await setLiveStatus({ mode: 'server', jobId: job && job.jobId, url: targetUrl, domain, phase: 'open' });
   
-  // PDFs are handled server-side, extension only handles HTML content
-  // If a PDF URL somehow reaches here, skip it (server downloads PDFs directly)
+  // Check if this is a PDF - if so, submit URL to server for download
   await setLiveStatus({ mode: 'server', jobId: job && job.jobId, url: targetUrl, domain, phase: 'check_content_type' });
   const pdfCheck = await checkIfPdf(tabId);
   
   if (pdfCheck.isPdf) {
-    console.log('[gg-sw] PDF detected - skipping (PDFs handled server-side)', { jobId: job.jobId, method: pdfCheck.method });
-    await logToServer(job.run_id, 'INFO', 'PDF detected - skipping job (PDFs are downloaded server-side)', { jobId: job.jobId, url: targetUrl, detectionMethod: pdfCheck.method });
-    await logActivity('INFO', `Job ${job.jobId} is a PDF - skipping (server handles PDFs)`, { url: targetUrl.substring(0, 100) });
+    console.log('[gg-sw] PDF detected - submitting to server for download', { jobId: job.jobId, method: pdfCheck.method });
+    await logToServer(job.run_id, 'INFO', 'PDF detected - submitting URL to server for download', { jobId: job.jobId, url: targetUrl, detectionMethod: pdfCheck.method });
+    await logActivity('INFO', `Job ${job.jobId} is a PDF - sending to server`, { url: targetUrl.substring(0, 100) });
     
-    // Close tab and return - server will handle this PDF
-    if (cfg.autoCloseTab) {
-      try { chrome.tabs.remove(tabId); } catch (e) {}
+    // Submit PDF URL to server
+    try {
+      await postResultPdf(cfg, job.jobId, pdfCheck.url || targetUrl, job.run_id);
+      hist.status = 'pdf_submitted';
+    } catch (pdfErr) {
+      console.error('[gg-sw] Failed to submit PDF to server', pdfErr);
+      await logActivity('ERROR', `Failed to submit PDF: ${pdfErr.message}`, { jobId: job.jobId });
+      hist.status = 'pdf_submit_failed';
     }
     
-    hist.status = 'skipped_pdf';
     hist.isPdf = true;
     await pushHistory(hist);
     await clearLiveStatus();
+    
+    // Close tab
+    if (cfg.autoCloseTab) {
+      try { chrome.tabs.remove(tabId); } catch (e) {}
+    }
     return;
   }
   
@@ -1998,22 +2054,65 @@ async function checkIfPdf(tabId) {
     const url = tab.url || '';
     
     // Check URL extension
-    if (url.endsWith('.pdf')) {
+    if (url.toLowerCase().endsWith('.pdf')) {
       console.log('[gg-sw] PDF detected by URL extension', { url: url.substring(0, 100) });
       return { isPdf: true, url, method: 'url_extension' };
     }
     
+    // Check if URL contains common PDF patterns
+    const urlLower = url.toLowerCase();
+    if (urlLower.includes('/pdf/') || urlLower.includes('.pdf?') || urlLower.includes('pdf=') || urlLower.includes('type=pdf')) {
+      console.log('[gg-sw] PDF detected by URL pattern', { url: url.substring(0, 100) });
+      return { isPdf: true, url, method: 'url_pattern' };
+    }
+    
+    // Check if Chrome's PDF viewer is active (chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai)
+    if (url.startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai')) {
+      console.log('[gg-sw] PDF detected by Chrome PDF viewer', { url: url.substring(0, 100) });
+      return { isPdf: true, url, method: 'chrome_pdf_viewer' };
+    }
+    
     // Check Content-Type via fetch
     try {
-      const resp = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+      const resp = await fetch(url, { method: 'HEAD', cache: 'no-store', redirect: 'follow' });
       const contentType = resp.headers.get('content-type') || '';
+      const finalUrl = resp.url; // Get final URL after redirects
       
       if (contentType.toLowerCase().includes('application/pdf')) {
-        console.log('[gg-sw] PDF detected by Content-Type', { url: url.substring(0, 100), contentType });
-        return { isPdf: true, url, contentType, method: 'content_type' };
+        console.log('[gg-sw] PDF detected by Content-Type', { url: finalUrl.substring(0, 100), contentType });
+        return { isPdf: true, url: finalUrl, contentType, method: 'content_type' };
+      }
+      
+      // Check if final URL ends with .pdf
+      if (finalUrl.toLowerCase().endsWith('.pdf')) {
+        console.log('[gg-sw] PDF detected by final URL extension', { url: finalUrl.substring(0, 100) });
+        return { isPdf: true, url: finalUrl, method: 'final_url_extension' };
       }
     } catch (e) {
       console.log('[gg-sw] PDF check fetch error (non-fatal)', { error: String(e) });
+    }
+    
+    // Check page content for PDF embed (Chrome renders PDFs with embed tag)
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const embed = document.querySelector('embed[type="application/pdf"]');
+          const isPdfViewer = document.body && document.body.children.length === 1 && 
+                              document.body.children[0].tagName === 'EMBED' &&
+                              document.body.children[0].type === 'application/pdf';
+          return { hasEmbed: !!embed, isPdfViewer, src: embed ? embed.src : null };
+        }
+      });
+      if (results && results[0] && results[0].result) {
+        const { hasEmbed, isPdfViewer, src } = results[0].result;
+        if (hasEmbed || isPdfViewer) {
+          console.log('[gg-sw] PDF detected by embed element', { url: url.substring(0, 100), src });
+          return { isPdf: true, url: src || url, method: 'embed_element' };
+        }
+      }
+    } catch (e) {
+      console.log('[gg-sw] PDF embed check error (non-fatal)', { error: String(e) });
     }
     
     return { isPdf: false, url };
@@ -2023,7 +2122,89 @@ async function checkIfPdf(tabId) {
   }
 }
 
-// NOTE: postResultPdf removed - PDFs are now downloaded and processed server-side
+async function postResultPdf(cfg, jobId, pdfUrl, runId) {
+  const base = (cfg.serverBaseUrl || '').replace(/\/$/, '');
+  
+  console.log('[gg-sw] postResultPdf begin - fetching PDF binary', { jobId, pdfUrl: pdfUrl.substring(0, 100) });
+  await logActivity('INFO', `Fetching PDF binary for job ${jobId}`, { url: pdfUrl.substring(0, 100) });
+  
+  try {
+    // Fetch the PDF binary content directly
+    const pdfResponse = await fetch(pdfUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/pdf,*/*'
+      }
+    });
+    
+    if (!pdfResponse.ok) {
+      throw new Error(`Failed to fetch PDF: HTTP ${pdfResponse.status}`);
+    }
+    
+    const pdfBlob = await pdfResponse.blob();
+    console.log('[gg-sw] PDF fetched', { jobId, size: pdfBlob.size, type: pdfBlob.type });
+    await logActivity('INFO', `PDF fetched: ${pdfBlob.size} bytes`, { jobId });
+    
+    if (runId) {
+      await logToServer(runId, 'INFO', `PDF fetched by extension: ${pdfBlob.size} bytes`, { jobId, url: pdfUrl.substring(0, 100) });
+    }
+    
+    // Upload PDF binary to server
+    const formData = new FormData();
+    formData.append('jobId', jobId);
+    formData.append('url', pdfUrl);
+    formData.append('pdfFile', pdfBlob, 'document.pdf');
+    
+    const token = await getAuthToken();
+    const uploadUrl = `${base}/crawl/result/pdf-binary`;
+    
+    const uploadResp = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      body: formData
+    });
+    
+    if (!uploadResp.ok) {
+      const text = await uploadResp.text().catch(() => '');
+      throw new Error(`Upload failed: HTTP ${uploadResp.status}: ${text.slice(0, 200)}`);
+    }
+    
+    const result = await uploadResp.json();
+    console.log('[gg-sw] PDF uploaded to server', { jobId, size: result.size, fileId: result.fileId });
+    await logActivity('SUCCESS', `PDF uploaded to server: ${result.size} bytes`, { jobId, fileId: result.fileId });
+    
+    if (runId) {
+      await logToServer(runId, 'SUCCESS', `PDF uploaded to server: ${result.size} bytes`, { jobId, fileId: result.fileId });
+    }
+    
+  } catch (fetchErr) {
+    console.error('[gg-sw] PDF fetch/upload failed, falling back to URL submission', fetchErr);
+    await logActivity('WARN', `PDF binary fetch failed, using URL fallback: ${fetchErr.message}`, { jobId });
+    
+    // Fallback: submit URL for server-side download
+    const url = `${base}/crawl/result/pdf`;
+    const payload = { jobId, url: pdfUrl };
+    
+    const headers = await getAuthHeaders();
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
+    }
+    
+    console.log('[gg-sw] PDF URL submitted (fallback)', { jobId });
+    await logActivity('SUCCESS', `PDF URL submitted (fallback) for job ${jobId}`, { url: pdfUrl.substring(0, 100) });
+    
+    if (runId) {
+      await logToServer(runId, 'SUCCESS', 'PDF URL submitted to server for download (fallback)', { jobId, url: pdfUrl.substring(0, 100) });
+    }
+  }
+}
 
 async function postResult(cfg, jobId, html, runId) {
   const base = (cfg.serverBaseUrl || '').replace(/\/$/, '');

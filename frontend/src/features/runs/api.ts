@@ -207,6 +207,7 @@ export const RunsAPI = {
   pause: (id: string) => http<void>(`/runs/${id}/pause`, { method: "POST" }),
   resume: (id: string) => http<void>(`/runs/${id}/resume`, { method: "POST" }),
   stop: (id: string) => http<void>(`/runs/${id}/stop`, { method: "POST" }),
+  skipCrawling: (id: string) => http<{ skippedJobs: number; skippedSources: number; runStatus: string }>(`/runs/${id}/skip-crawling`, { method: "POST" }),
   export: (id: string) => http<{ url: string }>(`/runs/${id}/export`, { method: "POST" }),
   
   /** Start extraction process for an existing run */

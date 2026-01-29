@@ -866,6 +866,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const refreshQueueBtn = document.getElementById('refreshQueue');
   const clearPendingJobsBtn = document.getElementById('clearPendingJobs');
   const clearAllJobsBtn = document.getElementById('clearAllJobs');
+  const pauseExtensionBtn = document.getElementById('pauseExtension');
+  const clearPendingTopBtn = document.getElementById('clearPendingTop');
   
   if (refreshQueueBtn) {
     refreshQueueBtn.addEventListener('click', fetchQueueStats);
@@ -877,6 +879,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   if (clearAllJobsBtn) {
     clearAllJobsBtn.addEventListener('click', () => clearQueue(null));
+  }
+  
+  // Top buttons - Pause Extension
+  if (pauseExtensionBtn) {
+    // Update button state based on current polling status
+    async function updatePauseButton() {
+      const cfg = await getCfg();
+      if (cfg.pollingEnabled) {
+        pauseExtensionBtn.textContent = '⏸️ Pause';
+        pauseExtensionBtn.style.background = '#f39c12';
+        pauseExtensionBtn.style.borderColor = '#f39c12';
+      } else {
+        pauseExtensionBtn.textContent = '▶️ Resume';
+        pauseExtensionBtn.style.background = '#27ae60';
+        pauseExtensionBtn.style.borderColor = '#27ae60';
+      }
+    }
+    updatePauseButton();
+    
+    pauseExtensionBtn.addEventListener('click', async () => {
+      const cfg = await getCfg();
+      const newState = !cfg.pollingEnabled;
+      await setCfg({ pollingEnabled: newState });
+      pollingEnabled.checked = newState;
+      await updatePauseButton();
+      lastStatus.textContent = newState ? 'status: Extension resumed' : 'status: Extension paused';
+    });
+  }
+  
+  // Top button - Clear Pending (duplicate of the one below for convenience)
+  if (clearPendingTopBtn) {
+    clearPendingTopBtn.addEventListener('click', () => clearQueue('PENDING'));
   }
   
   // Initial queue stats fetch

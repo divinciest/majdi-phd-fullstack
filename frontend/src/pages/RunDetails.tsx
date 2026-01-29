@@ -27,6 +27,9 @@ import {
   ChevronDown,
   GitGraph,
   RotateCcw,
+  FastForward,
+  Search,
+  Globe,
 } from "lucide-react";
 import { WorkflowVisualization } from "@/components/workflow/WorkflowVisualization";
 import { RunsAPI, Run, LogsResponse, EngineStatus, IPCMetadata, EngineLogsResponse, RunProgress, SchemaMapping, RunExtractedDataResponse, RunInspectionResponse, ValidationResult } from "@/features/runs/api";
@@ -52,6 +55,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { normalizeRetryName } from "@/lib/utils";
 
 // Interactive JSON Viewer Component with collapsible fields
 const JsonViewer = ({ data, title }: { data: any; title?: string }) => {
@@ -817,6 +821,24 @@ export default function RunDetails() {
     }
   };
 
+  const onSkipCrawling = async () => {
+    if (!id) return;
+    try {
+      const result = await RunsAPI.skipCrawling(id);
+      toast({ 
+        title: "Crawling skipped", 
+        description: `${result.skippedJobs} jobs skipped. Ready for extraction.` 
+      });
+      await fetchRun();
+    } catch (err: any) {
+      toast({
+        title: "Skip failed",
+        description: err?.message || String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   const onStart = async () => {
     if (!id) return;
     try {
@@ -881,6 +903,13 @@ export default function RunDetails() {
         return "destructive";
       case "waiting":
         return "warning";
+      case "searching":
+      case "researching":
+        return "info";
+      case "crawling":
+        return "warning";
+      case "paused":
+        return "secondary";
       default:
         return "secondary";
     }
@@ -898,6 +927,14 @@ export default function RunDetails() {
         return <AlertCircle className="h-4 w-4" />;
       case "aborted":
         return <AlertCircle className="h-4 w-4" />;
+      case "searching":
+        return <Search className="h-4 w-4 animate-pulse" />;
+      case "researching":
+        return <Globe className="h-4 w-4 animate-pulse" />;
+      case "crawling":
+        return <Download className="h-4 w-4 animate-pulse" />;
+      case "paused":
+        return <Pause className="h-4 w-4" />;
       default:
         return <Clock className="h-4 w-4" />;
     }
@@ -943,7 +980,7 @@ export default function RunDetails() {
             </Button>
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-2xl font-bold text-foreground">{run.name}</h1>
+                <h1 className="text-2xl font-bold text-foreground">{normalizeRetryName(run.name)}</h1>
                 <Badge variant={getStatusVariant(run.status)} className="flex items-center gap-1">
                   {getStatusIcon(run.status)}
                   {run.status}
@@ -1004,6 +1041,12 @@ export default function RunDetails() {
                 Stop
               </Button>
             )}
+            {run.status === "crawling" && (
+              <Button variant="outline" size="sm" onClick={onSkipCrawling}>
+                <FastForward className="h-4 w-4 mr-2" />
+                Skip Crawling
+              </Button>
+            )}
             <Button variant="default" size="sm" onClick={onExport}>
               <Download className="h-4 w-4 mr-2" />
               Export
@@ -1043,6 +1086,54 @@ export default function RunDetails() {
                   <span>Updated: {new Date(progress.updatedAt).toLocaleTimeString()}</span>
                 )}
               </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Deep Research Status - shown during searching/researching/crawling */}
+      {(run.status === "searching" || run.status === "researching" || run.status === "crawling") && (
+        <div className="px-6 pt-4">
+          <Card className="border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20">
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-3 mb-3">
+                {run.status === "searching" && (
+                  <>
+                    <Search className="h-5 w-5 text-blue-600 animate-pulse" />
+                    <div>
+                      <div className="font-medium text-blue-900 dark:text-blue-100">Searching...</div>
+                      <div className="text-sm text-blue-700 dark:text-blue-300">Querying Gemini Deep Research API</div>
+                    </div>
+                  </>
+                )}
+                {run.status === "researching" && (
+                  <>
+                    <Globe className="h-5 w-5 text-blue-600 animate-pulse" />
+                    <div>
+                      <div className="font-medium text-blue-900 dark:text-blue-100">Researching...</div>
+                      <div className="text-sm text-blue-700 dark:text-blue-300">Analyzing search results and extracting links</div>
+                    </div>
+                  </>
+                )}
+                {run.status === "crawling" && (
+                  <>
+                    <Download className="h-5 w-5 text-amber-600 animate-pulse" />
+                    <div>
+                      <div className="font-medium text-amber-900 dark:text-amber-100">Crawling Web Pages...</div>
+                      <div className="text-sm text-amber-700 dark:text-amber-300">
+                        Extension is fetching content from {run.sourcesCount || 0} sources
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              {run.status === "crawling" && run.sourcesCount && run.sourcesCount > 0 && (
+                <div className="mt-3 pt-3 border-t border-amber-200 dark:border-amber-800">
+                  <div className="text-xs text-amber-700 dark:text-amber-300">
+                    Tip: Make sure the Chrome extension is running and connected to fetch web pages.
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -1099,14 +1190,10 @@ export default function RunDetails() {
       {/* Tabs */}
       <div className="px-6 pb-6">
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="grid w-full grid-cols-7 lg:grid-cols-7">
             <TabsTrigger value="overview">
               <Settings className="h-4 w-4 mr-2" />
               Overview
-            </TabsTrigger>
-            <TabsTrigger value="workflow">
-              <GitGraph className="h-4 w-4 mr-2" />
-              Workflow
             </TabsTrigger>
             <TabsTrigger value="status">
               <Activity className="h-4 w-4 mr-2" />
@@ -1132,86 +1219,214 @@ export default function RunDetails() {
               <CheckCircle className="h-4 w-4 mr-2" />
               Validation
             </TabsTrigger>
-            <TabsTrigger value="metadata">
-              <Terminal className="h-4 w-4 mr-2" />
-              Metadata
-            </TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Run Configuration</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-4 border rounded-lg bg-muted/20">
-                    <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      PDF Source
-                    </h3>
-                    <p className="text-sm text-muted-foreground font-mono break-all">
-                      {run.pdfsDir || "Uploaded via web"}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {run.sourcesCount} PDF files
-                    </p>
-                  </div>
-                  <div className="p-4 border rounded-lg bg-muted/20">
-                    <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                      <Database className="h-4 w-4" />
-                      Excel Schema
-                    </h3>
-                    <p className="text-sm text-muted-foreground font-mono break-all">
-                      {run.excelPath ? run.excelPath.split(/[\\/]/).pop() : "Uploaded via web"}
-                    </p>
-                  </div>
-                </div>
+            <ScrollArea className="h-[calc(100vh-400px)] pr-4">
+              <div className="space-y-4">
+                {/* Run Identity */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Run Identity</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">Run ID</div>
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs bg-muted px-2 py-1 rounded font-mono">{run.id}</code>
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => copyToClipboard(run.id, "Run ID")}>
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">Name</div>
+                        <div className="text-sm font-medium">{normalizeRetryName(run.name)}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">Source Type</div>
+                        <Badge variant="outline">{run.sourceType || "pdf"}</Badge>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">Started</div>
+                        <div className="text-sm">{new Date(run.startDate).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
-                <div className="p-4 border rounded-lg">
-                  <h3 className="text-sm font-semibold mb-2">LLM Provider</h3>
-                  <Badge variant="secondary" className="text-sm">
-                    {run.llmProvider}
-                  </Badge>
-                </div>
+                {/* Source Configuration */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Source Configuration</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {run.sourceType === "deep_research" && run.deepResearchQuery && (
+                        <div className="col-span-2 space-y-1">
+                          <div className="text-xs text-muted-foreground font-medium">Deep Research Query</div>
+                          <div className="text-sm bg-muted/50 p-3 rounded-lg whitespace-pre-wrap">{run.deepResearchQuery}</div>
+                        </div>
+                      )}
+                      {run.sourceType === "links" && run.links && run.links.length > 0 && (
+                        <div className="col-span-2 space-y-1">
+                          <div className="text-xs text-muted-foreground font-medium">Links ({run.links.length})</div>
+                          <ScrollArea className="h-[150px] w-full">
+                            <div className="space-y-1">
+                              {run.links.map((link, i) => (
+                                <div key={i} className="text-xs font-mono bg-muted/50 p-2 rounded truncate">
+                                  {link.url}
+                                </div>
+                              ))}
+                            </div>
+                          </ScrollArea>
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">Sources Count</div>
+                        <div className="text-sm font-medium">{run.sourcesCount}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">Extracted Entries</div>
+                        <div className="text-sm font-medium">{run.dataEntriesCount}</div>
+                      </div>
+                      {run.pdfsDir && (
+                        <div className="col-span-2 space-y-1">
+                          <div className="text-xs text-muted-foreground font-medium">PDFs Directory</div>
+                          <code className="text-xs bg-muted px-2 py-1 rounded font-mono block break-all">{run.pdfsDir}</code>
+                        </div>
+                      )}
+                      {run.excelPath && (
+                        <div className="col-span-2 space-y-1">
+                          <div className="text-xs text-muted-foreground font-medium">Excel Schema</div>
+                          <code className="text-xs bg-muted px-2 py-1 rounded font-mono block break-all">{run.excelPath}</code>
+                        </div>
+                      )}
+                      {run.outputDir && (
+                        <div className="col-span-2 space-y-1">
+                          <div className="text-xs text-muted-foreground font-medium">Output Directory</div>
+                          <code className="text-xs bg-muted px-2 py-1 rounded font-mono block break-all">{run.outputDir}</code>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
 
+                {/* LLM & Processing Config */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">LLM & Processing Configuration</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">LLM Provider</div>
+                        <Badge variant="secondary">{run.llmProvider}</Badge>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">Row Counting</div>
+                        <Badge variant={run.enableRowCounting ? "default" : "outline"}>
+                          {run.enableRowCounting ? "Enabled" : "Disabled"}
+                        </Badge>
+                      </div>
+                      {run.schemaFileId && (
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground font-medium">Schema File ID</div>
+                          <code className="text-xs bg-muted px-2 py-1 rounded font-mono">{run.schemaFileId.slice(0, 8)}...</code>
+                        </div>
+                      )}
+                      {run.zipFileId && (
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground font-medium">Zip File ID</div>
+                          <code className="text-xs bg-muted px-2 py-1 rounded font-mono">{run.zipFileId.slice(0, 8)}...</code>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Extraction Instructions */}
                 {run.prompt && (
-                  <div className="p-4 border rounded-lg">
-                    <h3 className="text-sm font-semibold mb-2">Extraction Instructions</h3>
-                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                      {run.prompt}
-                    </p>
-                  </div>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Extraction Instructions</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ScrollArea className="h-[200px] w-full">
+                        <div className="text-sm whitespace-pre-wrap bg-muted/50 p-4 rounded-lg">
+                          {run.prompt}
+                        </div>
+                      </ScrollArea>
+                    </CardContent>
+                  </Card>
                 )}
 
-                {run.outputDir && (
-                  <div className="p-4 border rounded-lg bg-green-50 dark:bg-green-950/20">
-                    <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                      <Download className="h-4 w-4" />
-                      Output Directory
-                    </h3>
-                    <p className="text-sm text-muted-foreground font-mono break-all">
-                      {run.outputDir}
-                    </p>
-                  </div>
+                {/* Deep Research Result */}
+                {run.deepResearchResult && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Deep Research Result</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ScrollArea className="h-[200px] w-full">
+                        <div className="text-sm whitespace-pre-wrap bg-muted/50 p-4 rounded-lg">
+                          {run.deepResearchResult}
+                        </div>
+                      </ScrollArea>
+                    </CardContent>
+                  </Card>
                 )}
 
+                {/* Search Configuration */}
+                {(run.searchMethods?.length > 0 || run.searchQueries?.length > 0) && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Search Configuration</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        {run.searchMethods?.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="text-xs text-muted-foreground font-medium">Search Methods</div>
+                            <div className="flex flex-wrap gap-2">
+                              {run.searchMethods.map((method, i) => (
+                                <Badge key={i} variant="outline">{method}</Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {run.searchQueries?.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="text-xs text-muted-foreground font-medium">Search Queries</div>
+                            <div className="space-y-1">
+                              {run.searchQueries.map((query, i) => (
+                                <div key={i} className="text-xs bg-muted/50 p-2 rounded">{query}</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Advanced Metadata */}
                 {ipcMetadata?.metadata && (
-                  <div>
-                    <h3 className="text-sm font-semibold mb-3">Advanced Metadata</h3>
-                    <ScrollArea className="h-[300px] w-full">
-                      <DataDisplay data={ipcMetadata.metadata} onCopy={copyToClipboard} />
-                    </ScrollArea>
-                  </div>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Advanced Metadata</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ScrollArea className="h-[300px] w-full">
+                        <DataDisplay data={ipcMetadata.metadata} onCopy={copyToClipboard} />
+                      </ScrollArea>
+                    </CardContent>
+                  </Card>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Workflow Tab */}
-          <TabsContent value="workflow" className="mt-4">
-            <WorkflowVisualization runId={id!} />
+              </div>
+            </ScrollArea>
           </TabsContent>
 
           {/* Engine Status Tab */}
@@ -1896,78 +2111,6 @@ export default function RunDetails() {
           {/* Validation Tab */}
           <TabsContent value="validation" className="mt-4">
             <ValidationResultsTab runId={run.id} />
-          </TabsContent>
-
-          {/* Metadata Tab */}
-          <TabsContent value="metadata" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Run Metadata</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {/* Run Settings Summary */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="border rounded-lg p-3 bg-muted/50">
-                      <div className="text-xs text-muted-foreground">LLM Provider</div>
-                      <div className="font-medium">{run.llmProvider}</div>
-                    </div>
-                    <div className="border rounded-lg p-3 bg-muted/50">
-                      <div className="text-xs text-muted-foreground">Row Counting</div>
-                      <div className="font-medium">
-                        <Badge variant={run.enableRowCounting ? "default" : "secondary"}>
-                          {run.enableRowCounting ? "Enabled" : "Disabled"}
-                        </Badge>
-                      </div>
-                    </div>
-                    <div className="border rounded-lg p-3 bg-muted/50">
-                      <div className="text-xs text-muted-foreground">PDFs</div>
-                      <div className="font-medium">{run.sourcesCount}</div>
-                    </div>
-                    <div className="border rounded-lg p-3 bg-muted/50">
-                      <div className="text-xs text-muted-foreground">Entries</div>
-                      <div className="font-medium">{run.dataEntriesCount}</div>
-                    </div>
-                  </div>
-
-                  {/* Run ID */}
-                  <div className="border rounded-lg p-4 bg-muted/50">
-                    <div className="text-sm font-semibold mb-2">Run ID</div>
-                    <div className="flex items-center gap-2">
-                      <code className="text-xs bg-background px-3 py-2 rounded">
-                        {run.id}
-                      </code>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7"
-                        onClick={() => copyToClipboard(run.id, "Run ID")}
-                      >
-                        <Copy className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Prompt/Instructions */}
-                  {run.prompt && (
-                    <div className="border rounded-lg p-4 bg-muted/50">
-                      <div className="text-sm font-semibold mb-2">Extraction Instructions</div>
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">{run.prompt}</p>
-                    </div>
-                  )}
-
-                  {/* IPC Metadata */}
-                  {ipcMetadata && (
-                    <div>
-                      <h3 className="text-sm font-semibold mb-3">Configuration Details</h3>
-                      <ScrollArea className="h-[400px] w-full">
-                        <DataDisplay data={ipcMetadata.metadata} onCopy={copyToClipboard} />
-                      </ScrollArea>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
           </TabsContent>
         </Tabs>
       </div>

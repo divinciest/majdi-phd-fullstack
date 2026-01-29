@@ -298,7 +298,7 @@ def main():
         domain = source["domain"]
         html_content = source["html_content"]
         
-        print(f"\n[3/4] Processing ({i}/{len(sources)}): {url[:80]}...")
+        print(f"\n[3/4] Processing ({i}/{len(sources)}): {url}")
         
         # Update progress at start
         update_progress(i - 1, len(sources), url, "running", len(all_entries))
