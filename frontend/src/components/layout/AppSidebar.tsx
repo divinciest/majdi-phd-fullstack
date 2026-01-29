@@ -10,11 +10,15 @@ import {
   Database, 
   Settings,
   Wifi,
-  WifiOff
+  WifiOff,
+  LogOut,
+  User,
+  Search
 } from "lucide-react"
 import { NavLink, useLocation } from "react-router-dom"
 import { useEffect, useState } from "react"
 import { http } from "@/lib/http"
+import { useAuth } from "@/contexts/AuthContext"
 
 interface AppSidebarProps {
   className?: string
@@ -34,10 +38,16 @@ const navigation = [
     description: "Manage data collection runs"
   },
   {
-    name: "Articles",
-    href: "/articles", 
+    name: "Deep Research",
+    href: "/deep-research",
+    icon: Search,
+    description: "AI-powered research & crawling"
+  },
+  {
+    name: "Sources",
+    href: "/sources", 
     icon: FileText,
-    description: "Browse extracted articles"
+    description: "Browse extracted sources"
   },
   {
     name: "Exports",
@@ -68,6 +78,7 @@ const navigation = [
 export function AppSidebar({ className }: AppSidebarProps) {
   const location = useLocation()
   const [isConnected, setIsConnected] = useState(true)
+  const { user, logout } = useAuth()
 
   useEffect(() => {
     let active = true
@@ -151,16 +162,31 @@ export function AppSidebar({ className }: AppSidebarProps) {
         })}
       </nav>
 
-      {/* Footer */}
+      {/* Footer - User Menu */}
       <div className="border-t border-sidebar-border p-4">
         <div className="flex items-center space-x-3">
           <div className="h-8 w-8 rounded-full bg-gradient-primary flex items-center justify-center">
-            <span className="text-xs font-medium text-primary-foreground">AD</span>
+            <User className="h-4 w-4 text-primary-foreground" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-sidebar-foreground truncate">Administrator</p>
-            <p className="text-xs text-sidebar-foreground/60 truncate">System Operator</p>
+            <p className="text-sm font-medium text-sidebar-foreground truncate">
+              {user?.email || "Guest"}
+            </p>
+            <p className="text-xs text-sidebar-foreground/60 truncate">
+              {user ? "Authenticated" : "Not signed in"}
+            </p>
           </div>
+          {user && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={logout}
+              className="h-8 w-8 text-sidebar-foreground/60 hover:text-destructive"
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </div>
     </div>

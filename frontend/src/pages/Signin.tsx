@@ -3,23 +3,28 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useNavigate, Link } from "react-router-dom";
-import { AuthAPI } from "@/features/auth/api";
+import { useNavigate, Link, useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 
 export default function Signin() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Get the page user was trying to access
+  const from = (location.state as any)?.from?.pathname || "/";
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setLoading(true);
-      await AuthAPI.signin({ email, password });
+      await login(email, password);
       toast({ title: "Signed in", description: email });
-      navigate("/");
+      navigate(from, { replace: true });
     } catch (err: any) {
       toast({ title: "Sign in failed", description: err?.message || String(err), variant: "destructive" });
     } finally {

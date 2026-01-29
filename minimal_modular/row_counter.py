@@ -38,6 +38,8 @@ class JudgeResult:
     judge_reasoning: str
     all_counts: Dict[str, int]
     all_results: Dict[str, CounterResult]
+    raw_llm_response_text: Optional[str] = None
+    raw_llm_parsed_json: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -49,6 +51,9 @@ class RowCountingConfig:
     fallback_strategy: str = "max"
     timeout_seconds: int = 3600
     parallel_counters: bool = True
+    rowcount_provider: str = "gemini"
+    rowcount_model: Optional[str] = None
+    max_candidates: int = 5
 
 
 COUNTER_SYSTEM_PROMPT = """You are a scientific data structure analyst specialized in concrete research papers.
@@ -112,6 +117,72 @@ IMPORTANT:
 - Return ONLY valid JSON, no explanatory text before or after"""
 
     return prompt
+
+
+def build_multi_hypothesis_counter_prompt(instructions: str, pdf_text: str, max_candidates: int = 5) -> str:
+    counting_rules = extract_counting_rules(instructions)
+
+    prompt = f"""COUNTING RULES FROM EXTRACTION INSTRUCTIONS:
+{counting_rules if counting_rules else "(No specific counting rules provided)"}
+
+======================================================================
+
+PAPER CONTENT:
+{pdf_text[:150000]}
+
+======================================================================
+
+TASK:
+You must propose MULTIPLE plausible row-count definitions for this paper.
+Each candidate must correspond to a coherent definition of what counts as a row.
+Then you must PICK the best candidate under the counting rules.
+
+IMPORTANT:
+- Under-extraction is worse than slight over-extraction, but OUT-OF-SCOPE rows are forbidden.
+- If the paper contains multiple tests, you must prefer the candidate aligned with the target durability mechanism/coefficient implied by the instructions.
+- If values are only in figures, flag that clearly and reduce extractability.
+
+OUTPUT FORMAT (JSON only, no other text):
+{{
+  "candidates": [
+    {{
+      "id": "A",
+      "count": 40,
+      "logic": "<short explanation>",
+      "uses_figures": false,
+      "extractability": {{
+        "tables_only_supported": true,
+        "confidence": 0.75,
+        "risks": ["..."]
+      }}
+    }}
+  ],
+  "pick": {{
+    "winner_id": "A",
+    "reasoning": "<why this candidate is best given the rules>"
+  }}
+}}
+
+CONSTRAINTS:
+- Provide at most {max_candidates} candidates.
+- Keep 'logic' concise.
+- Return ONLY valid JSON.
+"""
+    return prompt
+
+
+def parse_multi_hypothesis_counter_response(response_text: str) -> Dict[str, Any]:
+    text = (response_text or "").strip()
+    if text.startswith('```'):
+        lines = text.split('\n')
+        text = '\n'.join(lines[1:-1] if lines[-1].strip() == '```' else lines[1:])
+
+    json_start = text.find('{')
+    json_end = text.rfind('}') + 1
+    if json_start >= 0 and json_end > json_start:
+        text = text[json_start:json_end]
+
+    return json.loads(text)
 
 
 def extract_counting_rules(instructions: str) -> str:
@@ -515,53 +586,83 @@ def run_row_counting_phase(
         return None
     
     print(f"\n      [ROW COUNTING PHASE]")
-    print(f"      → Counter models: {config.counter_models}")
-    print(f"      → Judge model: {config.judge_model}")
-    
-    counter_prompt = build_counter_prompt(instructions, pdf_text)
-    
-    if config.parallel_counters:
-        counter_results = run_counters_parallel(
-            config.counter_models,
-            COUNTER_SYSTEM_PROMPT,
-            counter_prompt,
-            llm_call_fn,
-            use_cache
+    provider = getattr(config, 'rowcount_provider', None) or "gemini"
+    model_override = getattr(config, 'rowcount_model', None)
+    max_candidates = getattr(config, 'max_candidates', 5) or 5
+    print(f"      → RowCount provider: {provider}")
+
+    user_prompt = build_multi_hypothesis_counter_prompt(instructions, pdf_text, max_candidates=max_candidates)
+
+    try:
+        response = llm_call_fn(
+            system_prompt=COUNTER_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            use_cache=use_cache
         )
-    else:
-        counter_results = run_counters_sequential(
-            config.counter_models,
-            COUNTER_SYSTEM_PROMPT,
-            counter_prompt,
-            llm_call_fn,
-            use_cache
-        )
-    
-    valid_count = sum(1 for r in counter_results.values() if r.count > 0 and not r.error)
-    print(f"      → Valid counter results: {valid_count}/{len(counter_results)}")
-    
-    if valid_count == 0:
-        print(f"      → All counters failed, skipping row counting constraint")
+    except Exception as e:
+        print(f"      → RowCount [{provider}] failed: {str(e)}")
         return None
-    
-    judge_result = run_judge(
-        config.judge_model,
-        pdf_text,
-        counter_results,
-        instructions,
-        llm_call_fn,
-        use_cache
+
+    response_text = response.get('choices', [{}])[0].get('message', {}).get('content', '')
+    try:
+        parsed = parse_multi_hypothesis_counter_response(response_text)
+    except Exception as e:
+        print(f"      → RowCount parse error: {str(e)}")
+        return None
+
+    candidates = parsed.get('candidates') or []
+    pick = parsed.get('pick') or {}
+    winner_id = (pick.get('winner_id') or '').strip() or (candidates[0].get('id') if candidates else '')
+
+    winner_candidate = None
+    all_counts: Dict[str, int] = {}
+    all_results: Dict[str, CounterResult] = {}
+
+    for c in candidates:
+        cid = str(c.get('id') or '').strip()
+        if not cid:
+            continue
+        count_val = int(c.get('count') or 0)
+        logic = str(c.get('logic') or '')
+        row_desc = []
+
+        all_counts[cid] = count_val
+        all_results[cid] = CounterResult(
+            model=cid,
+            count=count_val,
+            logic=logic,
+            row_descriptions=row_desc,
+            raw_response=response_text
+        )
+
+        if cid == winner_id:
+            winner_candidate = all_results[cid]
+
+    if winner_candidate is None and all_results:
+        first_key = next(iter(all_results.keys()))
+        winner_id = first_key
+        winner_candidate = all_results[first_key]
+
+    if winner_candidate is None or winner_candidate.count <= 0:
+        print(f"      → RowCount produced no valid winner")
+        return None
+
+    judge_reasoning = str(pick.get('reasoning') or '')
+
+    result = JudgeResult(
+        winner_model=winner_id,
+        winner_count=winner_candidate.count,
+        winner_logic=winner_candidate.logic,
+        winner_row_descriptions=[],
+        judge_reasoning=judge_reasoning,
+        all_counts=all_counts,
+        all_results=all_results,
+        raw_llm_response_text=response_text,
+        raw_llm_parsed_json=parsed
     )
-    
-    if judge_result is None:
-        print(f"      → Judge failed, using fallback strategy: {config.fallback_strategy}")
-        judge_result = fallback_selection(counter_results, config.fallback_strategy)
-    
-    if judge_result:
-        print(f"      → Final row count: {judge_result.winner_count}")
-        print(f"      → All counts: {judge_result.all_counts}")
-    
-    return judge_result
+
+    print(f"      → Final row count: {result.winner_count} (winner: {result.winner_model})")
+    return result
 
 
 def save_row_counting_result(
@@ -571,17 +672,17 @@ def save_row_counting_result(
     """Save the row counting result to a JSON file."""
     
     output_data = {
+        "raw_llm_response_text": result.raw_llm_response_text,
+        "raw_llm_parsed_json": result.raw_llm_parsed_json,
         "winning_model": result.winner_model,
         "count": result.winner_count,
         "logic": result.winner_logic,
-        "row_descriptions": result.winner_row_descriptions,
         "judge_reasoning": result.judge_reasoning,
         "all_counts": result.all_counts,
         "counter_outputs": {
             model: {
                 "count": r.count,
                 "logic": r.logic,
-                "row_descriptions": r.row_descriptions,
                 "error": r.error
             }
             for model, r in result.all_results.items()

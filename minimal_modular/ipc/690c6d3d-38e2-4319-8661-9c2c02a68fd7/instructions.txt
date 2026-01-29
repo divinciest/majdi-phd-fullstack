@@ -1,0 +1,90 @@
+CRETEXTRACT-LW v1.3 — Perlite Lightweight Concrete Extraction (Measurement-Event Schema)
+
+FILES PROVIDED TO THE MODEL
+1) Schema: Schema_Updated_Perlite_MeasureEvent_v1_3.xlsx (column names and order are authoritative)
+2) Master Prompt: this file
+3) Alias Dictionary: Alias_Dictionary_LW_Perlite_MeasureEvent_v1_3.yaml
+
+OBJECTIVE
+Extract structured data from a single scientific paper on lightweight concrete containing perlite (expanded perlite as filler/aggregate),
+and populate the schema exactly.
+
+This schema is measurement-event based:
+EACH ROW MUST REPRESENT EXACTLY ONE MEASUREMENT EVENT, encoded in the columns:
+Test Property, Test Age/Time (+ unit), Test Value (+ unit), and conditional basis/method fields.
+
+NON‑NEGOTIABLE RULES
+A) Schema lock: Do not add, remove, rename, or reorder columns. Every cell must be filled with a value or the literal 'N.A.'.
+B) No inference: Record only explicitly reported values. If not stated, write 'N.A.'.
+C) No hidden conversions: Do not convert units, cube↔cylinder, volume↔mass, or fresh↔dry densities unless the authors explicitly provide
+   the converted value (or provide the conversion equation AND all parameters AND perform that conversion explicitly in the paper).
+D) Table precedence: If text conflicts with tables, tables dominate.
+
+SCOPE FILTER (INCLUSION)
+Include if and only if:
+- Perlite is used in the concrete mixture (e.g., 'perlite', 'expanded perlite', 'perlite aggregate', 'perlite sand') AND
+- At least one target measurement is reported: strength, density, shrinkage, slump/flow, or mix temperature.
+If perlite is not present in the mix constituents, do not extract (output no rows).
+
+STEP 1 — STUDY METADATA (repeat across all rows)
+Populate DOI, Year, Country as reported.
+Country = first author affiliation country (if unclear, 'N.A.').
+
+STEP 2 — MIX IDENTIFICATION (Mix ID)
+A Mix ID is a uniquely defined mixture in the paper (e.g., 'P20', 'Mix A', 'LW30', 'Control', 'M1').
+If the paper provides no explicit IDs but clearly separates mixes in a table, assign deterministic IDs (Mix_1, Mix_2, …) consistent with table order.
+If mixes cannot be distinguished, use 'N.A.'.
+
+STEP 3 — MIX DESIGN / MATERIALS (repeat for every row with the same Mix ID)
+Populate all mix-design and materials columns from the schema (cement, SCMs, water, aggregates, admixtures, air content, curing, etc.) as explicitly reported.
+
+Perlite block (mandatory when perlite exists; record only if explicitly reported):
+- Perlite Content (kg/m3): ONLY if the paper reports perlite mass per volume of concrete (kg/m3). Otherwise 'N.A.'.
+- Perlite Replacement Basis (mass/volume): record 'mass' or 'volume' if stated; otherwise 'N.A.'.
+- Perlite Replacement Level (% or ratio): record the exact % or ratio as reported (e.g., 20%, 1:4 by volume). Otherwise 'N.A.'.
+- Perlite Bulk Density (kg/m3): record if reported (bulk / wet / loose / packed as stated). Otherwise 'N.A.'.
+- Perlite Water Absorption (%): record if reported. Otherwise 'N.A.'.
+- Perlite Initial Moisture Content (%): record if reported. Otherwise 'N.A.'.
+- Perlite Moisture Condition / Pre-wetting: record 'dry', 'pre-wetted', 'soaked X h', 'SSD-like', etc. exactly as described. Otherwise 'N.A.'.
+- Perlite Nominal Size / Grade: record sieve range, nominal size, or commercial grade if reported. Otherwise 'N.A.'.
+
+Do not force capture of optical/industrial descriptors (color, brightness, refractive index, oil absorption, ignition loss). These are out of scope.
+
+STEP 4 — ROW COUNTING LOGIC (MEASUREMENT‑EVENT ANCHOR)
+Each row MUST correspond to exactly ONE measurement event.
+
+Row identity (minimum):
+{DOI × Mix ID × Test Property × Test Age/Time × Test Age/Time Unit}
+
+Additional identity when needed:
+- If Test Property = 'density' and multiple density bases exist, separate rows by Density Basis.
+- If Test Property = 'shrinkage' and multiple shrinkage types exist, separate rows by Shrinkage Type.
+
+Do NOT create replicate rows for repeats/replicates; use mean values as reported.
+Do NOT merge different properties into a single row.
+
+Fresh tests:
+- For slump/flow/mix temperature recorded at fresh state, set Test Age/Time = 0 and Test Age/Time Unit = 'fresh'.
+
+STEP 5 — MEASUREMENT FIELDS (fill per row)
+Populate these columns for the measurement represented by the row:
+- Test Property: one of {fc, ft_split, ft_direct, fr, density, shrinkage, slump, slump_flow, flow, Tmix}
+- Test Age/Time: numeric (0 allowed for fresh)
+- Test Age/Time Unit: {d, h, min, fresh} as reported
+- Test Value: numeric
+- Test Value Unit: {MPa, kg/m3, mm, °C, microstrain, mm/m, %, ...} exactly as reported
+
+Conditional fields:
+- Density Basis: fill ONLY if Test Property = density; else 'N.A.'
+- Shrinkage Type / Method: fill ONLY if Test Property = shrinkage; else 'N.A.'
+- Specimen Type/Geometry and Test Standard/Method: fill if stated; else 'N.A.' (if digitized, write 'Figure-digitized (Fig. X)').
+
+STEP 6 — LEGACY DENSITY COLUMNS
+The schema contains Wet Density and Dry Density columns.
+Populate them ONLY when the paper explicitly reports these specific definitions:
+- Wet Density (kg/m3): for fresh/wet/SSD wording (as stated by authors)
+- Dry Density: for air-dry/oven-dry/dry wording (as stated by authors)
+If density is reported but basis does not match these definitions, keep Wet/Dry Density as 'N.A.' and rely on the measurement fields + Density Basis.
+
+OUTPUT
+Return only the fully populated table matching the schema. No extra commentary.

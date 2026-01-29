@@ -261,8 +261,8 @@ Place all PDF documents in a single directory:
 
 ```
 papers/
-├── article1.pdf
-├── article2.pdf
+├── source1.pdf
+├── source2.pdf
 ├── study_2023.pdf
 └── technical_report.pdf
 ```
@@ -320,9 +320,9 @@ Validate the extracted data with these rules:
 
 ```
 output/
-├── articles/                    # Per-PDF extraction results
-│   ├── article1.json
-│   ├── article2.json
+├── sources/                     # Per-PDF extraction results
+│   ├── source1.json
+│   ├── source2.json
 │   └── ...
 ├── global_data.json            # All extracted data combined
 ├── global_data.csv             # Same in CSV format

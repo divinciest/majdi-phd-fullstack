@@ -6,6 +6,11 @@ export const API_BASE_URL: string =
 
 export type HttpError = Error & { status?: number; details?: unknown };
 
+// Get auth token from localStorage
+function getAuthToken(): string | null {
+  return localStorage.getItem("cretextract_token");
+}
+
 export async function http<T>(path: string, init?: (RequestInit & { silent?: boolean })): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
   try {
@@ -13,8 +18,19 @@ export async function http<T>(path: string, init?: (RequestInit & { silent?: boo
     const timeoutMs = 60 * 60 * 1000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort("Request timeout after 1 hour"), timeoutMs);
+    
+    // Build headers with auth token if available
+    const token = getAuthToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(init?.headers as Record<string, string> || {}),
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    
     const res = await fetch(url, {
-      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+      headers,
       credentials: "include",
       signal: controller.signal,
       ...init,

@@ -15,6 +15,24 @@ from typing import Any, Optional
 
 CACHE_DIR = Path(__file__).parent / "cache"
 
+# User context for sandboxed caching
+_current_user_id: Optional[str] = None
+
+def set_cache_user(user_id: Optional[str]) -> None:
+    """Set current user for cache sandboxing."""
+    global _current_user_id
+    _current_user_id = user_id
+
+def get_cache_user() -> Optional[str]:
+    """Get current user for cache sandboxing."""
+    return _current_user_id
+
+def _get_user_prefix() -> str:
+    """Get user prefix for cache keys."""
+    if _current_user_id:
+        return _current_user_id[:8]
+    return "global"
+
 
 def _ensure_cache_dir(subdir: str = "") -> Path:
     """Ensure cache directory exists and return path."""
@@ -23,9 +41,12 @@ def _ensure_cache_dir(subdir: str = "") -> Path:
     return cache_path
 
 
-def _file_hash(filepath: str) -> str:
+def _file_hash(filepath: str, include_user: bool = True) -> str:
     """Compute hash of file for cache key."""
     h = hashlib.sha256()
+    # Include user prefix for sandboxing
+    if include_user:
+        h.update(_get_user_prefix().encode('utf-8'))
     h.update(filepath.encode('utf-8'))
     # Include file size and mtime for invalidation
     try:
@@ -34,6 +55,20 @@ def _file_hash(filepath: str) -> str:
         h.update(str(int(stat.st_mtime)).encode())
     except:
         pass
+    return h.hexdigest()[:16]
+
+
+def _file_bytes_hash(filepath: str, include_user: bool = True) -> str:
+    """Compute hash of file bytes for cache key.
+
+    This makes caching stable across different run directories (same content => same key).
+    """
+    h = hashlib.sha256()
+    if include_user:
+        h.update(_get_user_prefix().encode('utf-8'))
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(chunk)
     return h.hexdigest()[:16]
 
 
@@ -47,7 +82,7 @@ def _content_hash(content: str) -> str:
 def get_surya_cache(pdf_path: str) -> Optional[str]:
     """Get cached Surya conversion result for PDF."""
     cache_path = _ensure_cache_dir("surya")
-    key = _file_hash(pdf_path)
+    key = _file_bytes_hash(pdf_path)
     cache_file = cache_path / f"{key}.txt"
     
     if cache_file.exists():
@@ -63,7 +98,7 @@ def get_surya_cache(pdf_path: str) -> Optional[str]:
 def set_surya_cache(pdf_path: str, content: str) -> None:
     """Cache Surya conversion result for PDF."""
     cache_path = _ensure_cache_dir("surya")
-    key = _file_hash(pdf_path)
+    key = _file_bytes_hash(pdf_path)
     cache_file = cache_path / f"{key}.txt"
     
     try:
@@ -85,6 +120,8 @@ def set_surya_cache(pdf_path: str, content: str) -> None:
 def _gpt_cache_key(system_prompt: str, user_prompt: str, model: str) -> str:
     """Generate cache key for GPT request."""
     h = hashlib.sha256()
+    # Include user prefix for sandboxing
+    h.update(_get_user_prefix().encode('utf-8'))
     h.update(model.encode('utf-8'))
     h.update(system_prompt.encode('utf-8'))
     h.update(user_prompt.encode('utf-8'))

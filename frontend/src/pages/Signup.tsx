@@ -4,11 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useNavigate, Link } from "react-router-dom";
-import { AuthAPI } from "@/features/auth/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 
 export default function Signup() {
   const navigate = useNavigate();
+  const { signup } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -17,9 +18,9 @@ export default function Signup() {
     e.preventDefault();
     try {
       setLoading(true);
-      await AuthAPI.signup({ email, password });
-      toast({ title: "Account created", description: email });
-      navigate("/signin");
+      await signup(email, password);
+      toast({ title: "Account created", description: "Welcome!" });
+      navigate("/");
     } catch (err: any) {
       toast({ title: "Sign up failed", description: err?.message || String(err), variant: "destructive" });
     } finally {

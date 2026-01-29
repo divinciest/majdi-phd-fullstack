@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GatherGrid Crawler</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 12px; }
+    .row { margin-bottom: 8px; }
+    label { display: block; font-size: 12px; color: #444; margin-bottom: 4px; }
+    input[type="text"], input[type="number"] { width: 260px; padding: 6px; }
+    .status { font-size: 12px; color: #333; background: #f4f4f4; padding: 8px; border-radius: 6px; min-width: 260px; }
+    .flex { display: flex; align-items: center; gap: 8px; }
+    .btn { padding: 6px 10px; border: 1px solid #bbb; background: #fff; cursor: pointer; border-radius: 4px; }
+  </style>
+  <script defer src="popup.js?v=5"></script>
+  </head>
+<body>
+  <div class="row"><strong>GatherGrid Crawler</strong></div>
+
+  <div class="row">
+    <label for="serverBaseUrl">Server Base URL</label>
+    <input id="serverBaseUrl" type="text" placeholder="http://localhost:5007" />
+  </div>
+
+  <div class="row flex">
+    <label for="pollingEnabled">Polling Enabled</label>
+    <input id="pollingEnabled" type="checkbox" />
+  </div>
+
+  <div class="row">
+    <label for="pollIntervalSec">Poll Interval (sec)</label>
+    <input id="pollIntervalSec" type="number" min="5" step="1" />
+  </div>
+
+  <div class="row flex">
+    <label for="autoCloseTab">Auto-close tab after submit</label>
+    <input id="autoCloseTab" type="checkbox" />
+  </div>
+
+  <div class="row flex">
+    <label for="redirectDetectionEnabled">Detect Redirects</label>
+    <input id="redirectDetectionEnabled" type="checkbox" />
+  </div>
+
+  <div class="row">
+    <label for="redirectMinTextLength">Min Text Length (chars)</label>
+    <input id="redirectMinTextLength" type="number" min="500" step="500" style="width: 260px" />
+  </div>
+
+  <div class="row">
+    <label for="redirectMaxWaitMs">Max Redirect Wait (ms)</label>
+    <input id="redirectMaxWaitMs" type="number" min="5000" step="1000" style="width: 260px" />
+  </div>
+
+  <hr />
+  <div class="row"><strong>Cache Settings</strong></div>
+  <div class="row flex">
+    <label for="crawlCacheEnabled">Crawl Cache</label>
+    <input id="crawlCacheEnabled" type="checkbox" />
+  </div>
+  <div class="row flex">
+    <label for="llmCacheEnabled">LLM Cache</label>
+    <input id="llmCacheEnabled" type="checkbox" />
+  </div>
+  <div class="row flex">
+    <button id="applyCacheSetting" class="btn">Apply Cache Settings</button>
+  </div>
+
+  <div class="row">
+    <div id="cacheStats" class="status" style="font-size: 11px; padding: 6px; margin-top: 8px;">
+      <div id="crawlCacheStats">Crawl: — entries, — MB</div>
+      <div id="llmCacheStats">LLM: — entries, — MB</div>
+    </div>
+  </div>
+
+  <div class="row"><strong>Cache Management</strong></div>
+  <div class="row flex" style="gap: 4px;">
+    <button id="clearCrawlCache" class="btn" style="background: #ff6b6b; color: white; border-color: #ff6b6b; font-size: 11px;">Clear Crawl Cache</button>
+    <button id="clearLLMCache" class="btn" style="background: #ff6b6b; color: white; border-color: #ff6b6b; font-size: 11px;">Clear LLM Cache</button>
+  </div>
+  <div class="row flex">
+    <button id="clearAllCaches" class="btn" style="background: #d63031; color: white; border-color: #d63031; width: 100%; font-size: 11px;">⚠️ Clear All Caches</button>
+  </div>
+  <div class="row flex">
+    <button id="clearNoTableCache" class="btn" style="background: #f39c12; color: white; border-color: #f39c12; width: 100%; font-size: 11px;">🗑️ Clear Cache (No Tables)</button>
+  </div>
+
+  <hr />
+  <div class="row"><strong>Queue Management</strong></div>
+  <div class="row">
+    <div id="queueStats" class="status" style="font-size: 11px; padding: 6px;">
+      <div style="font-weight: bold; margin-bottom: 4px;">Job Queue Status:</div>
+      <div>Total: <span id="queueTotal">—</span> | Pending: <span id="queuePending">—</span></div>
+      <div>Claimed: <span id="queueClaimed">—</span> | Done: <span id="queueDone">—</span></div>
+      <div>Failed: <span id="queueFailed">—</span></div>
+    </div>
+  </div>
+  <div class="row flex" style="gap: 4px;">
+    <button id="refreshQueue" class="btn" style="font-size: 11px;">Refresh Queue</button>
+    <button id="clearPendingJobs" class="btn" style="background: #ff6b6b; color: white; border-color: #ff6b6b; font-size: 11px;">Clear Pending</button>
+  </div>
+  <div class="row flex">
+    <button id="clearAllJobs" class="btn" style="background: #d63031; color: white; border-color: #d63031; width: 100%; font-size: 11px;">⚠️ Clear All Jobs</button>
+  </div>
+
+  <hr />
+  <div class="row"><strong>Test Crawl</strong></div>
+  <div class="row flex">
+    <input id="testUrl" type="text" placeholder="https://example.com/article" style="width: 260px" />
+    <button id="testGo" class="btn">Start</button>
+  </div>
+
+  <div class="row flex">
+    <button id="save" class="btn">Save</button>
+  </div>
+
+  <div class="row">
+    <div id="lastStatus" class="status">status: —</div>
+  </div>
+
+  <div class="row">
+    <div id="liveStatus" class="status">live: —</div>
+  </div>
+
+  <hr />
+  <div class="row">
+    <div class="flex" style="justify-content: space-between; align-items: center;">
+      <strong>🔍 Debug Panel</strong>
+      <div class="flex" style="gap: 4px;">
+        <button id="openLogsBtn" class="btn" style="font-size: 11px; padding: 4px 8px; background: #569cd6; color: #fff; border-color: #569cd6;">📝 Open Log Stream</button>
+        <button id="expandAllBtn" class="btn" style="font-size: 11px; padding: 4px 8px;">Expand All</button>
+        <button id="collapseAllBtn" class="btn" style="font-size: 11px; padding: 4px 8px;">Collapse All</button>
+        <button id="refreshDebugBtn" class="btn" style="font-size: 11px; padding: 4px 8px;">Refresh</button>
+      </div>
+    </div>
+  </div>
+  
+  <details id="debugLiveStatus" open>
+    <summary style="cursor: pointer; font-weight: bold; margin: 8px 0 4px 0;">⚡ Live Status</summary>
+    <div id="debugLiveStatusContent" class="status" style="font-family: monospace; font-size: 11px; white-space: pre-wrap;"></div>
+  </details>
+
+  <details id="debugPollingStatus" open>
+    <summary style="cursor: pointer; font-weight: bold; margin: 8px 0 4px 0;">🔄 Polling Status</summary>
+    <div id="debugPollingContent" class="status" style="font-family: monospace; font-size: 11px; white-space: pre-wrap;"></div>
+  </details>
+
+  <details id="debugActiveJobs">
+    <summary style="cursor: pointer; font-weight: bold; margin: 8px 0 4px 0;">📋 Active Jobs Queue</summary>
+    <div id="debugJobsContent" class="status" style="font-family: monospace; font-size: 11px; white-space: pre-wrap;"></div>
+  </details>
+
+  <details id="debugDomainStatus">
+    <summary style="cursor: pointer; font-weight: bold; margin: 8px 0 4px 0;">🌐 Domain Status</summary>
+    <div id="debugDomainsContent" class="status" style="font-family: monospace; font-size: 11px; white-space: pre-wrap;"></div>
+  </details>
+
+  <details id="debugActivityLog">
+    <summary style="cursor: pointer; font-weight: bold; margin: 8px 0 4px 0;">📝 Activity Log (Last 50)</summary>
+    <div id="debugLogContent" class="status" style="font-family: monospace; font-size: 10px; white-space: pre-wrap; max-height: 300px; overflow-y: auto;"></div>
+  </details>
+
+  <details id="debugAlarms">
+    <summary style="cursor: pointer; font-weight: bold; margin: 8px 0 4px 0;">⏰ Chrome Alarms</summary>
+    <div id="debugAlarmsContent" class="status" style="font-family: monospace; font-size: 11px; white-space: pre-wrap;"></div>
+  </details>
+
+  <hr />
+  <div class="row"><strong>History</strong></div>
+  <div class="row">
+    <div class="flex" style="margin-bottom:6px">
+      <button id="refreshHistory" class="btn">Refresh</button>
+      <button id="clearHistory" class="btn">Clear</button>
+    </div>
+    <div id="historyList"></div>
+  </div>
+
+  <hr />
+  <div class="row"><strong>Domain Scripts</strong></div>
+  <div class="row">
+    <div class="flex" style="margin-bottom:6px">
+      <button id="syncScripts" class="btn">Sync</button>
+    </div>
+    <div id="scriptsPanel"></div>
+  </div>
+
+  <hr />
+  <div class="row"><strong>Domains</strong></div>
+  <div class="row">
+    <div id="domainsPanel">
+      <div id="pendingDomains"></div>
+      <div id="allowedDomains"></div>
+    </div>
+  </div>
+</body>
+</html>

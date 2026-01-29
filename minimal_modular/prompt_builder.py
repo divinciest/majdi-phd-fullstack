@@ -25,12 +25,12 @@ def synthesize_extraction_prompt(
     content: str,
     allow_early_rejection: bool = True
 ) -> str:
-    """Build user prompt with schema, instructions, and article content.
+    """Build user prompt with schema, instructions, and source content.
     
     Args:
         schema: Schema dict with 'fields' array
         instructions: Domain-specific extraction instructions
-        content: Article content to extract from
+        content: Source content to extract from
         allow_early_rejection: If True, LLM can reject paper early
         
     Returns:
@@ -63,8 +63,8 @@ def synthesize_extraction_prompt(
     lines.append("=" * 70)
     lines.append("")
     
-    # Add article content (limited to 200k chars)
-    lines.append("Here is the article content to extract from:")
+    # Add source content (limited to 200k chars)
+    lines.append("Here is the source content to extract from:")
     lines.append("")
     lines.append(content[:200000])
     lines.append("")
@@ -77,6 +77,9 @@ def synthesize_extraction_prompt(
         lines.append("")
         lines.append("Option 1 - If paper contains extractable data:")
         lines.append('  {"status": "accepted", "data": [...array of extracted objects...]}')
+        lines.append("")
+        lines.append("CRITICAL: In each object inside 'data', the JSON keys MUST be the EXACT schema field names shown above (e.g., 'Reference', 'Mix ID', etc.).")
+        lines.append("DO NOT use keys like 'Field 1', 'Field 2', etc.")
         lines.append("")
         lines.append("Option 2 - If paper does NOT meet acceptance criteria (e.g., wrong methodology,")
         lines.append("  theoretical paper, no experimental data, wrong test standard):")
@@ -102,7 +105,7 @@ def synthesize_constrained_extraction_prompt(
     instructions: str,
     content: str,
     row_count: int,
-    row_descriptions: List[Dict[str, str]],
+    row_descriptions: Optional[List[Dict[str, str]]],
     chunk_index: Optional[int] = None,
     total_chunks: Optional[int] = None
 ) -> str:
@@ -112,7 +115,7 @@ def synthesize_constrained_extraction_prompt(
     Args:
         schema: Schema dict with 'fields' array
         instructions: Domain-specific extraction instructions
-        content: Article content to extract from
+        content: Source content to extract from
         row_count: Expected number of rows for THIS chunk (not total)
         row_descriptions: List of dicts with 'id' and 'desc' for rows in THIS chunk
         chunk_index: Current chunk number (1-indexed) if chunked extraction
@@ -147,17 +150,17 @@ def synthesize_constrained_extraction_prompt(
         lines.append(f"You MUST extract EXACTLY {row_count} rows.")
     
     lines.append("")
-    lines.append("Rows to extract in this batch:")
-    lines.append("")
-    
-    for row_desc in row_descriptions[:row_count]:
-        row_id = row_desc.get('id', '?')
-        desc = row_desc.get('desc', 'Unknown')
-        lines.append(f"  Row {row_id}: {desc}")
-    
-    if len(row_descriptions) < row_count:
-        for i in range(len(row_descriptions) + 1, row_count + 1):
-            lines.append(f"  Row {i}: (additional data point)")
+    if row_descriptions:
+        lines.append("Rows to extract in this batch:")
+        lines.append("")
+        for row_desc in row_descriptions[:row_count]:
+            row_id = row_desc.get('id', '?')
+            desc = row_desc.get('desc', 'Unknown')
+            lines.append(f"  Row {row_id}: {desc}")
+        if len(row_descriptions) < row_count:
+            for i in range(len(row_descriptions) + 1, row_count + 1):
+                lines.append(f"  Row {i}: (additional data point)")
+        lines.append("")
     
     lines.append("")
     lines.append("CRITICAL RULES:")
@@ -180,7 +183,7 @@ def synthesize_constrained_extraction_prompt(
     lines.append("=" * 70)
     lines.append("")
     
-    lines.append("Here is the article content to extract from:")
+    lines.append("Here is the source content to extract from:")
     lines.append("")
     lines.append(content[:200000])
     lines.append("")
@@ -192,6 +195,8 @@ def synthesize_constrained_extraction_prompt(
     lines.append('{"status": "accepted", "data": [...array of EXACTLY ' + str(row_count) + ' objects...]}')
     lines.append("")
     lines.append("Each object must contain ALL schema fields.")
+    lines.append("CRITICAL: The JSON keys MUST be the EXACT schema field names shown above (e.g., 'Reference', 'Mix ID', etc.).")
+    lines.append("DO NOT use keys like 'Field 1', 'Field 2', etc.")
     lines.append('Use "Missing" for values not found in the paper.')
     lines.append("")
     lines.append("No explanatory text before or after the JSON response.")

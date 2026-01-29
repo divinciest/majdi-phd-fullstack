@@ -1,0 +1,1080 @@
+C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular>python extract.py --pdfs "C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Papers" --excel "C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Schema\Migration_Schema.xlsx" --validation-config "C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\validation\configs\nt_build_492.json" --output-dir "C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results"
+
+[1/4] Loading schema from C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Schema\Migration_Schema.xlsx...
+      → 66 fields: ['Reference', 'Mix ID', 'w/b', 'Water\n (Kg/m3)', 'Cement type \n(according to EN)']...
+
+[2/4] Found 132 PDF files to process
+
+[3/4] Processing (1/132): A. Bagheri, A. Ajam, H. Zanganeh.pdf
+      → Converting PDF to text via Surya API...
+      → Got 62,944 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (2/132): A. Bagheri, H. Zanganeh, H. Alizadeh, M. Shakerinia, M.A.S. Marian.pdf
+      → Converting PDF to text via Surya API...
+      → Got 52,647 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (3/132): A. Camões.pdf
+      → Converting PDF to text via Surya API...
+      → Got 26,045 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (4/132): A. Chatzopoulos, K.K. Sideris, C. Tassos.pdf
+      → Converting PDF to text via Surya API...
+      → Got 89,794 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (5/132): A. El Mir, S.G. Nehme.pdf
+      → Converting PDF to text via Surya API...
+      → Got 71,959 characters
+      → Calling LLM for extraction...
+      → Extracted 12 entries
+      → Extracted 12 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\A. El Mir, S.G. Nehme.csv
+      → Appended to global CSV
+
+[3/4] Processing (6/132): A. Gokce, C. Beyaz, H. Ozkan.pdf
+      → Converting PDF to text via Surya API...
+      → Got 78,198 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (7/132): A. Habibi, A.M. Ramezanianpour, M. Mahdikhani, O. Bamshad.pdf
+      → Converting PDF to text via Surya API...
+      → Got 83,922 characters
+      → Calling LLM for extraction...
+      → ✗ EARLY REJECTION by LLM: The paper does not contain data from the NT Build 492 test method (Non-Steady State Migration). It uses ASTM C1202 (RCPT) and ASTM C1760 (Bulk Electrical Conductivity), which do not provide the required Dnssm values.
+      → Rejection comment saved: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\A. Habibi, A.M. Ramezanianpour, M. Mahdikhani, O. Bamshad_rejection.txt
+      → Extracted 0 entries
+
+[3/4] Processing (8/132): A. Litorowicz.pdf
+      → Converting PDF to text via Surya API...
+      → Got 47,232 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (9/132): A. Pilvar, A.A. Ramezanianpour, H. Rajaie, S.M.M. Karein.pdf
+      → Converting PDF to text via Surya API...
+      → Got 45,918 characters
+      → Calling LLM for extraction...
+      → Extracted 24 entries
+      → Extracted 24 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\A. Pilvar, A.A. Ramezanianpour, H. Rajaie, S.M.M. Karein.csv
+      → Appended to global CSV
+
+[3/4] Processing (10/132): A. Pilvar, A.A. Ramezanianpour, H. Rajaie.pdf
+      → Converting PDF to text via Surya API...
+      → Got 52,177 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (11/132): A. Ramezanianpour, A. Kazemian, M. Moghaddam, F. Moodi, A. Ramezanianpour.pdf
+      → Converting PDF to text via Surya API...
+      → Got 53,995 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (12/132): A. Ramezanianpour, S.M.M. Karein, P. Vosoughi, A. Pilvar, S. Isapour, F. Moodi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 43,364 characters
+      → Calling LLM for extraction...
+      → Extracted 16 entries
+      → Extracted 16 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\A. Ramezanianpour, S.M.M. Karein, P. Vosoughi, A. Pilvar, S. Isapour, F. Moodi.csv
+      → Appended to global CSV
+
+[3/4] Processing (13/132): A.E. Besheli, K. Samimi, F.M. Nejad, E. Darvishan.pdf
+      → Converting PDF to text via Surya API...
+      → Got 99,205 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (14/132): A.H.Y. Yaraghi, A.M. Ramezanianpour, A.A. Ramezanianpour, F. Bahman-Zadeh, A. Zolfagharnasab.pdf
+      → Converting PDF to text via Surya API...
+      → Got 97,596 characters
+      → Calling LLM for extraction...
+      → Extracted 7 entries
+      → Extracted 7 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\A.H.Y. Yaraghi, A.M. Ramezanianpour, A.A. Ramezanianpour, F. Bahman-Zadeh, A. Zolfagharnasab.csv
+      → Appended to global CSV
+
+[3/4] Processing (15/132): B. Baten, T. Manzur, I. Ahmed.pdf
+      → Converting PDF to text via Surya API...
+      → Got 93,417 characters
+      → Calling LLM for extraction...
+      → Extracted 15 entries
+      → Extracted 15 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\B. Baten, T. Manzur, I. Ahmed.csv
+      → Appended to global CSV
+
+[3/4] Processing (16/132): B. Sangoju, G. Ramesh, B. Bharatkumar, K. Ramanjaneyulu.pdf
+      → Converting PDF to text via Surya API...
+      → Got 39,311 characters
+      → Calling LLM for extraction...
+      → ✗ EARLY REJECTION by LLM: The paper provides RCMT durability data for concrete specimens supplied from a construction site, explicitly stating that the mix details for these samples are not available. The mix design provided in Table 3 is for a separate 'typical' trial study for which no RCMT data is reported.
+      → Rejection comment saved: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\B. Sangoju, G. Ramesh, B. Bharatkumar, K. Ramanjaneyulu_rejection.txt
+      → Extracted 0 entries
+
+[3/4] Processing (17/132): C. Cardoso, A. Camões, R. Eires, A. Mota, J. Araújo, F. Castro, J. Carvalho.pdf
+      → Converting PDF to text via Surya API...
+      → Got 74,922 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (18/132): C. Ruixing, M. Song, L. Jiaping.pdf
+      → Converting PDF to text via Surya API...
+      → Got 94,977 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (19/132): C.C. Yang, C. Chiang.pdf
+      → Converting PDF to text via Surya API...
+      → Got 47,961 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (20/132): D. Jóźwiak-Niedźwiedzka.pdf
+      → Converting PDF to text via Surya API...
+      → Got 45,554 characters
+      → Calling LLM for extraction...
+      → ERROR calling LLM: HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Read timed out. (read timeout=600)
+      → Extracted 0 entries
+
+[3/4] Processing (21/132): D. Pedro, J. De Brito, L. Evangelista.pdf
+      → Converting PDF to text via Surya API...
+      → Got 111,074 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (22/132): E. Soldado, A. Antunes, H. Costa, R. do Carmo, E. Júlio.pdf
+      → Converting PDF to text via Surya API...
+      → Got 97,028 characters
+      → Calling LLM for extraction...
+      → ✗ EARLY REJECTION by LLM: The paper provides mix designs for concrete (including coarse aggregates) but performs all experimental characterizations (mechanical strength, durability tests like chloride migration and carbonation) on the mortar matrices (sand and paste) only. The specific mix proportions for the tested mortar specimens (kg/m³) are not explicitly provided, and linking the concrete mix designs to the mortar properties would be scientifically incorrect.
+      → Rejection comment saved: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\E. Soldado, A. Antunes, H. Costa, R. do Carmo, E. Júlio_rejection.txt
+      → Extracted 0 entries
+
+[3/4] Processing (23/132): E.G. Badogiannis, I.P. Sfikas, D.V. Voukia, K.G. Trezos, S.G. Tsivilis.pdf
+      → Converting PDF to text via Surya API...
+      → Got 69,497 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (24/132): E.R. Teixeira, A. Camões, F. Branco.pdf
+      → Converting PDF to text via Surya API...
+      → Got 93,864 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (25/132): F. Bahman-Zadeh, A. Zolfagharnasab, M. Pourebrahimi, M. Mirabrishami, A.A. Ramezanianpour.pdf
+      → Converting PDF to text via Surya API...
+      → Got 87,683 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (26/132): F.K. Sell Junior, G.B. Wally.pdf
+      → Converting PDF to text via Surya API...
+      → Got 54,284 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (27/132): G. Bumanis, D. Bajare, A. Korjakins.pdf
+      → Converting PDF to text via Surya API...
+      → Got 27,569 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (28/132): G. Bumanis, D. Bajare, D. Goljandin.pdf
+      → Converting PDF to text via Surya API...
+      → Got 60,958 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (29/132): G.B. Wally, F.C. Magalhães, F.K. Sell Junior, F.R. Teixeira, M. de Vasconcellos Real.pdf
+      → Converting PDF to text via Surya API...
+      → Got 73,632 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (30/132): G.B. Wally, M. da Cruz Larrossa, L.C. de Lemos Pinheiro, M. de Vasconcellos Real, F.C. Magalhães.pdf
+      → Converting PDF to text via Surya API...
+      → Got 49,601 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (31/132): G.C. Guignone, G.L. Vieira, R. Zulcão, G. Mion, G. Baptista.pdf
+      → Converting PDF to text via Surya API...
+      → Got 83,089 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (32/132): H. Du, K.H. Tan.pdf
+      → Converting PDF to text via Surya API...
+      → Got 57,816 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (33/132): H. Hao-bo, Z. Guo-zhi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 17,748 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (34/132): H. Kim, C.-J. Lee, C.-S. Shon, H. Moon, C.-W. Chung.pdf
+      → Converting PDF to text via Surya API...
+      → Got 53,142 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (35/132): H. Madani, A.A. Ramezanianpour, M. Shahbazinia, V. Bokaeian, S. Ahari.pdf
+      → Converting PDF to text via Surya API...
+      → Got 46,980 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (36/132): H. Madani, M.N. Norouzifar, J. Rostami.pdf
+      → Converting PDF to text via Surya API...
+      → Got 78,290 characters
+      → Calling LLM for extraction...
+      → ERROR calling LLM: HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Read timed out. (read timeout=600)
+      → Extracted 0 entries
+
+[3/4] Processing (37/132): H. Sasanipour, F. Aslani, J. Taherinezhad.pdf
+      → Converting PDF to text via Surya API...
+      → Got 101,865 characters
+      → Calling LLM for extraction...
+      → Extracted 12 entries
+      → Extracted 12 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\H. Sasanipour, F. Aslani, J. Taherinezhad.csv
+      → Appended to global CSV
+
+[3/4] Processing (38/132): H. Zhao, W. Sun, X. Wu, B. Gao.pdf
+      → Converting PDF to text via Surya API...
+      → Got 60,950 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (39/132): H. Zhong, M. Zhang.pdf
+      → Converting PDF to text via Surya API...
+      → Got 86,886 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (40/132): H.G. Campos Silva, P. Garces Terradillos, E. Zornoza, J.M. Mendoza-Rangel, P. Castro-Borges, C.A. Juarez Alvarado.pdf
+      → Converting PDF to text via Surya API...
+      → Got 65,596 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (41/132): H.T. Cam, N. Neithalath.pdf
+      → Converting PDF to text via Surya API...
+      → Got 71,969 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (42/132): H.Y. Moon, H.S. Kim, D.S. Choi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 42,783 characters
+      → Calling LLM for extraction...
+      → Extracted 12 entries
+      → Extracted 12 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\H.Y. Moon, H.S. Kim, D.S. Choi.csv
+      → Appended to global CSV
+
+[3/4] Processing (43/132): I.P. Sfikas, A. Kanellopoulos, K.G. Trezos, M.F. Petrou.pdf
+      → Converting PDF to text via Surya API...
+      → Got 69,609 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (44/132): J. Bernal, M. Fenaux, A. Moragues, E. Reyes, J. Gálvez.pdf
+      → Converting PDF to text via Surya API...
+      → Got 73,831 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (45/132): J. Esmaeili, H. Aslani.pdf
+      → Converting PDF to text via Surya API...
+      → Got 66,202 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (46/132): J. Jain, K.P. Verian, J. Olek, N. Whiting.pdf
+      → Converting PDF to text via Surya API...
+      → Got 46,760 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (47/132): J. Jain, N. Neithalath.pdf
+      → Converting PDF to text via Surya API...
+      → Got 81,082 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (48/132): J. Liu, X. Wang, Q. Qiu, G. Ou, F. Xing.pdf
+      → Converting PDF to text via Surya API...
+      → Got 53,910 characters
+      → Calling LLM for extraction...
+      → Extracted 15 entries
+      → Extracted 15 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\J. Liu, X. Wang, Q. Qiu, G. Ou, F. Xing.csv
+      → Appended to global CSV
+
+[3/4] Processing (49/132): J. Nobre, M. Bravo, J. de Brito, G. Duarte.pdf
+      → Converting PDF to text via Surya API...
+      → Got 85,423 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (50/132): J. Park, C. Park, S. Joh, H. Lee.pdf
+      → Converting PDF to text via Surya API...
+      → Got 70,203 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (51/132): J. Pontes, J.A. Bogas, S. Real, A. Silva.pdf
+      → Converting PDF to text via Surya API...
+      → Got 130,237 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (52/132): J.-I. Park, K.-M. Lee, S.-O. Kwon, S.-H. Bae, S.-H. Jung, S.-W. Yoo.pdf
+      → Converting PDF to text via Surya API...
+      → Got 46,580 characters
+      → Calling LLM for extraction...
+      → ERROR calling LLM: HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Read timed out. (read timeout=600)
+      → Extracted 0 entries
+
+[3/4] Processing (53/132): J.A. Bogas, A. Gomes.pdf
+      → Converting PDF to text via Surya API...
+      → Got 123,399 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (54/132): J.A. Bogas, T. Gomes.pdf
+      → Converting PDF to text via Surya API...
+      → Got 81,525 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (55/132): J.R.H. Junior, C.E. Balestra, R.A. Medeiros-Junior.pdf
+      → Converting PDF to text via Surya API...
+      → Got 82,756 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (56/132): K. Audenaert, Q. Yuan, G. De Schutter.pdf
+      → Converting PDF to text via Surya API...
+      → Got 56,102 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (57/132): K. Celik, C. Meral, A.P. Gursel, P.K. Mehta, A. Horvath, P.J. Monteiro.pdf
+      → Converting PDF to text via Surya API...
+      → Got 102,218 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (58/132): K. Kim, M. Shin, S. Cha.pdf
+      → Converting PDF to text via Surya API...
+      → Got 66,204 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (59/132): K. Samimi, G.R. Dehghan Kamaragi, R. Le Roy.pdf
+      → Converting PDF to text via Surya API...
+      → Got 100,828 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (60/132): K. Samimi, S. Kamali-Bernard, A.A. Maghsoudi, M. Maghsoudi, H. Siad.pdf
+      → Converting PDF to text via Surya API...
+      → Got 112,452 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (61/132): K. Samimi, S. Kamali-Bernard, A.A. Maghsoudi, S. Lgcgm, E. Civil.pdf
+      → Converting PDF to text via Surya API...
+      → Got 62,012 characters
+      → Calling LLM for extraction...
+      → Extracted 30 entries
+      → Extracted 30 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\K. Samimi, S. Kamali-Bernard, A.A. Maghsoudi, S. Lgcgm, E. Civil.csv
+      → Appended to global CSV
+
+[3/4] Processing (62/132): K.-S. Youm, J. Moon, J.-Y. Cho, J.J. Kim.pdf
+      → Converting PDF to text via Surya API...
+      → Got 62,483 characters
+      → Calling LLM for extraction...
+      → Extracted 18 entries
+      → Extracted 18 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\K.-S. Youm, J. Moon, J.-Y. Cho, J.J. Kim.csv
+      → Appended to global CSV
+
+[3/4] Processing (63/132): K.A.A. Al-Sodani, M.M. Al-Zahrani, M. Maslehuddin, O.S.B. Al-Amoudi, S.U. Al-Dulaijan.pdf
+      → Converting PDF to text via Surya API...
+      → Got 68,026 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (64/132): K.K. Sideris, C. Tassos, A. Chatzopoulos, P. Manita.pdf
+      → Converting PDF to text via Surya API...
+      → Got 58,258 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (65/132): L. Coppola, D. Coffetti, E. Crotti, G. Gazzaniga, T. Pastore.pdf
+      → Converting PDF to text via Surya API...
+      → Got 66,418 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (66/132): L. Evangelista, J. de Brito.pdf
+      → Converting PDF to text via Surya API...
+      → Got 29,285 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (67/132): L. Luo, G. De Schutter.pdf
+      → Converting PDF to text via Surya API...
+      → Got 41,634 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (68/132): L. Peng, Y. Zhao, J. Ban, Y. Wang, P. Shen, J.-X. Lu, C.-S. Poon.pdf
+      → Converting PDF to text via Surya API...
+      → Got 90,708 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (69/132): L. Zheng, M.R. Jones, Z. Song.pdf
+      → Converting PDF to text via Surya API...
+      → Got 63,341 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (70/132): L.M. Nicula, O. Corbu, M. Iliescu, A.V. Sandu, A. Hegyi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 84,178 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (71/132): M. Abed, R. Nemes.pdf
+      → Converting PDF to text via Surya API...
+      → Got 86,737 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (72/132): M. Aguayo, P. Yang, K. Vance, G. Sant, N. Neithalath.pdf
+      → Converting PDF to text via Surya API...
+      → Got 80,378 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (73/132): M. Fazilati, E.M. Golafshani.pdf
+      → Converting PDF to text via Surya API...
+      → Got 94,603 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (74/132): M. Gomes, J. de Brito.pdf
+      → Converting PDF to text via Surya API...
+      → Got 54,682 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (75/132): M. Khoshroo, P. Ghoddousi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 97,990 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (76/132): M. Maes, E. Gruyaert, N. De Belie.pdf
+      → Converting PDF to text via Surya API...
+      → Got 65,754 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (77/132): M. Marks, D. Jozwiak-Niedzwiedzka.pdf
+      → Converting PDF to text via Surya API...
+      → Got 169,665 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (78/132): M. Marks, D. Jóźwiak-Niedźwiedzka, M.A. Glinicki.pdf
+      → Converting PDF to text via Surya API...
+      → Got 31,539 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (79/132): M. Marks, M.A. Glinicki.pdf
+      → Converting PDF to text via Surya API...
+      → Got 73,091 characters
+      → Calling LLM for extraction...
+      → Extracted 56 entries
+      → Extracted 56 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\M. Marks, M.A. Glinicki.csv
+      → Appended to global CSV
+
+[3/4] Processing (80/132): M.A. Glinicki, D. Jóźwiak-Niedźwiedzka, K. Gibas, M. Dąbrowski.pdf
+      → Converting PDF to text via Surya API...
+      → Got 65,349 characters
+      → Calling LLM for extraction...
+      → Extracted 24 entries
+      → Extracted 24 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\M.A. Glinicki, D. Jóźwiak-Niedźwiedzka, K. Gibas, M. Dąbrowski.csv
+      → Appended to global CSV
+
+[3/4] Processing (81/132): M.A. Nawaz, L.A. Qureshi, B. Ali, A. Raza.pdf
+      → Converting PDF to text via Surya API...
+      → Got 52,819 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (82/132): M.A.B. MehwishAsad, M. Safdar, A. Elahi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 73,331 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (83/132): M.M.L. Pereira, V.M.S. Capuzzo, J. de Brito.pdf
+      → Converting PDF to text via Surya API...
+      → Got 96,717 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (84/132): M.R. Jones, M.J. McCarthy, M.D. Newlands.pdf
+      → Converting PDF to text via Surya API...
+      → Got 49,080 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (85/132): M.S. Nadesan, P. Dinakar.pdf
+      → Converting PDF to text via Surya API...
+      → Got 76,729 characters
+      → Calling LLM for extraction...
+      → Extracted 10 entries
+      → Extracted 10 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\M.S. Nadesan, P. Dinakar.csv
+      → Appended to global CSV
+
+[3/4] Processing (86/132): N. Ghafoori, B. Moradi, M. Najimi, A. Hasnat.pdf
+      → Converting PDF to text via Surya API...
+      → Got 65,051 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (87/132): N. Ghafoori, R. Spitek, M. Najimi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 58,423 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (88/132): N. Neithalath, J. Jain.pdf
+      → Converting PDF to text via Surya API...
+      → Got 73,822 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (89/132): O. Cascudo, R. Teodoro, A.M. de Oliveira, H. Carasek.pdf
+      → Converting PDF to text via Surya API...
+      → Got 80,911 characters
+      → Calling LLM for extraction...
+      → Extracted 8 entries
+      → Extracted 8 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\O. Cascudo, R. Teodoro, A.M. de Oliveira, H. Carasek.csv
+      → Appended to global CSV
+
+[3/4] Processing (90/132): P. Ghoddousi, A.M. Salehi, A.A. Shirzadi Javid, M.A. Etebari Ghasbeh, S. Sajjadi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 76,264 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (91/132): P. Rajhans, P.K. Gupta, R.R. Kumar, S.K. Panda, S. Nayak.pdf
+      → Converting PDF to text via Surya API...
+      → Got 72,763 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (92/132): P. Rattanachu, I. Karntong, W. Tangchirapat, C. Jaturapitakkul, P. Chindaprasirt.pdf
+      → Converting PDF to text via Surya API...
+      → Got 69,655 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (93/132): P.R. Da Silva, J. De Brito.pdf
+      → Converting PDF to text via Surya API...
+      → Got 83,925 characters
+      → Calling LLM for extraction...
+      → ERROR calling LLM: HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Read timed out. (read timeout=600)
+      → Extracted 0 entries
+
+[3/4] Processing (94/132): Pore structure and durability of green concrete containing recycled powder and recycled coarse aggregate.pdf
+      → Converting PDF to text via Surya API...
+      → Got 96,566 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (95/132): Prediction of diffusivity of concrete based on simple analytic equations, Cement and Concrete Research.pdf
+      → Converting PDF to text via Surya API...
+      → Got 103,576 characters
+      → Calling LLM for extraction...
+      → Extracted 26 entries
+      → Extracted 26 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\Prediction of diffusivity of concrete based on simple analytic equations, Cement and Concrete Research.csv
+      → Appended to global CSV
+
+[3/4] Processing (96/132): Prediction of mechanical and durability characteristics of concrete including slag and recycled aggregate concrete with artificial neural networks.pdf
+      → Converting PDF to text via Surya API...
+      → Got 75,700 characters
+      → Calling LLM for extraction...
+      → Extracted 36 entries
+      → Extracted 36 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\Prediction of mechanical and durability characteristics of concrete including slag and recycled aggregate concrete with artificial neural networks.csv
+      → Appended to global CSV
+
+[3/4] Processing (97/132): Q. Li, H. Geng, Y. Huang, Z. Shui.pdf
+      → Converting PDF to text via Surya API...
+      → Got 57,412 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (98/132): R. Bucher, M. Cyr, G. Escadeillas.pdf
+      → Converting PDF to text via Surya API...
+      → Got 89,842 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (99/132): R. Ferreira, J. Castro-Gomes, P. Costa, R. Malheiro.pdf
+      → Converting PDF to text via Surya API...
+      → Got 64,234 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (100/132): R. Gettu, R.G. Pillai, M. Santhanam, A.S. Basavaraj, S. Rathnarajan, B. Dhanya.pdf
+      → Converting PDF to text via Surya API...
+      → Got 93,748 characters
+      → Calling LLM for extraction...
+      → Extracted 30 entries
+      → Extracted 30 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\R. Gettu, R.G. Pillai, M. Santhanam, A.S. Basavaraj, S. Rathnarajan, B. Dhanya.csv
+      → Appended to global CSV
+
+[3/4] Processing (101/132): R. Van Noort, M. Hunger, P. Spiesz.pdf
+      → Converting PDF to text via Surya API...
+      → Got 108,806 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (102/132): R.-W. Shiu, C.-C. Yang.pdf
+      → Converting PDF to text via Surya API...
+      → Got 62,280 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (103/132): R.L. Henriques, P.B. Athayde, A.G.d. Magalhães, T.A. Magalhães, F.V.d. Andrade.pdf
+      → Converting PDF to text via Surya API...
+      → Got 87,933 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (104/132): S. Cheng, Z. Shui, Q. Li, T. Sun, R. Yang.pdf
+      → Converting PDF to text via Surya API...
+      → Got 51,774 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (105/132): S. Cheng, Z. Shui, T. Sun, R. Yu, G. Zhang.pdf
+      → Converting PDF to text via Surya API...
+      → Got 67,844 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (106/132): S. Kim, M. Usman, C. Park, A. Hanif.pdf
+      → Converting PDF to text via Surya API...
+      → Got 62,288 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (107/132): S. Park, Y. Choi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 31,412 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (108/132): S. Real, J.A. Bogas, J. Pontes.pdf
+      → Converting PDF to text via Surya API...
+      → Got 111,631 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (109/132): S.-w. Choi, B.-s. Jang, J.-h. Kim, K.-m. Lee,.pdf
+      → Converting PDF to text via Surya API...
+      → Got 46,583 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (110/132): S.-w. Choi, B.-s. Jang, J.-h. Kim, K.-m. Lee.pdf
+      → Converting PDF to text via Surya API...
+      → Got 42,945 characters
+      → Calling LLM for extraction...
+      → Extracted 8 entries
+      → Extracted 8 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\S.-w. Choi, B.-s. Jang, J.-h. Kim, K.-m. Lee.csv
+      → Appended to global CSV
+
+[3/4] Processing (111/132): S.A. Santos, P.R. da Silva, J. De Brito.pdf
+      → Converting PDF to text via Surya API...
+      → Got 118,558 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (112/132): S.M.S. Kazmi, M.J. Munir, Y.-F. Wu, I. Patnaikuni, Y. Zhou, F. Xing.pdf
+      → Converting PDF to text via Surya API...
+      → Got 92,466 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (113/132): S.S. Kim, A. Qudoos, S.H. Jakhrani, J.B. Lee, H.G. Kim.pdf
+      → Converting PDF to text via Surya API...
+      → Got 47,869 characters
+      → Calling LLM for extraction...
+      → Extracted 24 entries
+      → Extracted 24 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\S.S. Kim, A. Qudoos, S.H. Jakhrani, J.B. Lee, H.G. Kim.csv
+      → Appended to global CSV
+
+[3/4] Processing (114/132): T. Ali-Boucetta, M. Behim, F. Cassagnabere, M. Mouret, A. Ayat, W. Laifa.pdf
+      → Converting PDF to text via Surya API...
+      → Got 106,414 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (115/132): T. Barroqueiro, P.R. da Silva, J. De Brito.pdf
+      → Converting PDF to text via Surya API...
+      → Got 110,518 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (116/132): T. Luping, I. Löfgren.pdf
+      → Converting PDF to text via Surya API...
+      → Got 129,668 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (117/132): T. Luping.pdf
+      → Converting PDF to text via Surya API...
+      → Got 235,307 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (118/132): T. Simčič, S. Pejovnik, G. De Schutter, V.B. Bosiljkov.pdf
+      → Converting PDF to text via Surya API...
+      → Got 52,046 characters
+      → Calling LLM for extraction...
+      → Extracted 10 entries
+      → Extracted 10 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\T. Simčič, S. Pejovnik, G. De Schutter, V.B. Bosiljkov.csv
+      → Appended to global CSV
+
+[3/4] Processing (119/132): T. Vieira, A. Alves, J. De Brito, J. Correia, R. Silva.pdf
+      → Converting PDF to text via Surya API...
+      → Got 69,989 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (120/132): V. Afroughsabet, L. Biolzi, P.J. Monteiro.pdf
+      → Converting PDF to text via Surya API...
+      → Got 107,814 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (121/132): V.M. Agrawal, P.P. Savoikar.pdf
+      → Converting PDF to text via Surya API...
+      → Got 46,826 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (122/132): W. Kubissa, B. Pacewska, I. Wilińska.pdf
+      → Converting PDF to text via Surya API...
+      → Got 33,970 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (123/132): W. Kubissa, R. Jaskulski, P. Reiterman.pdf
+      → Converting PDF to text via Surya API...
+      → Got 46,633 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (124/132): W. Kubissa, T. Simon, R. Jaskulski, P. Reiterman, M. Supera.pdf
+      → Converting PDF to text via Surya API...
+      → Got 35,455 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (125/132): W.M. Shaban, K. Elbaz, J. Yang, B.S. Thomas, X. Shen, L. Li, Y. Du, J. Xie, L. Li.pdf
+      → Converting PDF to text via Surya API...
+      → Got 90,027 characters
+      → Calling LLM for extraction...
+      → Extracted 10 entries
+      → Extracted 10 entries
+      → Saved article CSV: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\articles\W.M. Shaban, K. Elbaz, J. Yang, B.S. Thomas, X. Shen, L. Li, Y. Du, J. Xie, L. Li.csv
+      → Appended to global CSV
+
+[3/4] Processing (126/132): X. Huang, S. Hu, F. Wang, L. Yang, M. Rao, Y. Mu, C. Wang.pdf
+      → Converting PDF to text via Surya API...
+      → Got 48,711 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (127/132): X. Liu, H. Du, M.-H. Zhang.pdf
+      → Converting PDF to text via Surya API...
+      → Got 54,549 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (128/132): X. Liu, K.S. Chia, M.-H. Zhang.pdf
+      → Converting PDF to text via Surya API...
+      → Got 66,036 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (129/132): X. Liu, M.-H. Zhang.pdf
+      → Converting PDF to text via Surya API...
+      → Got 63,341 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (130/132): Y. Biskri, D. Achoura, N. Chelghoum, M. Mouret.pdf
+      → Converting PDF to text via Surya API...
+      → Got 72,577 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (131/132): Y.C. Choi, B. Park, G.-S. Pang, K.-M. Lee, S. Choi.pdf
+      → Converting PDF to text via Surya API...
+      → Got 47,569 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[3/4] Processing (132/132): Z. Wang, C. Shi, J. Song.pdf
+      → Converting PDF to text via Surya API...
+      → Got 33,837 characters
+      → Calling LLM for extraction...
+      → Extracted 0 entries
+      → Extracted 0 entries
+
+[4/5] Saving 403 total entries to C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\global_data.json
+
+[5/5] POST-PROCESSING: Data Validation
+================================================================================
+✓ Loaded 'NT_BUILD_492_Full_Validation' (21 rules)
+
+================================================================================
+COLUMN ALIGNMENT
+================================================================================
+
+Column Alignment:
+================================================================================
+Required: 28 columns
+Available: 67 columns
+
+Tier 1: Fuzzy Matching (case/space insensitive)
+  ✓ Fuzzy match: 'Compressive_strength_MPa' → 'Compressive strength (MPa)' (score: 0.96)
+  ✗ No match: 'Anode_NaOH_M'
+  ✓ Fuzzy match: 'Volume_fraction_aggregate' → 'Volume fraction of aggregate' (score: 0.92)
+  ✓ Fuzzy match: 'Size_of_specimen_mm' → 'Size of specimen
+mm' (score: 0.91)
+  ✗ No match: 'Silver_nitrate_M'
+  ✓ Fuzzy match: 'Slag_GGBS_kg_m3' → 'Slag
+GGBS
+(Kg/m3)' (score: 0.89)
+  ✗ No match: 'Total_agg_kg_m3'
+  ✗ No match: 'Age_at_strength_test_days'
+  ✓ Fuzzy match: 'Water_kg_m3' → 'Water
+ (Kg/m3)' (score: 0.90)
+  ✓ Fuzzy match: 'Cement_kg_m3' → 'Cement (Kg/m3)' (score: 0.91)
+  ✓ Fuzzy match: 'Limestone_powder_kg_m3' → 'Limestone
+powder
+(Kg/m3)' (score: 0.93)
+  ✗ No match: 'Coarse_agg_kg_m3'
+  ✓ Fuzzy match: 'Curing_temperature_C' → 'Curing temperature
+°C' (score: 0.95)
+  ✓ Fuzzy match: 'Fly_ash_kg_m3' → 'Fly ash  (Kg/m3)' (score: 0.87)
+  ✓ Fuzzy match: 'Slump_mm' → 'Slump (mm)' (score: 0.93)
+  ✓ Fuzzy match: 'Dry_density_kg_m3' → 'Dry density (kg/m3)' (score: 0.90)
+  ✓ Fuzzy match: 'Concrete_age_at_migration_days' → 'Concrete age at migration test (days)' (score: 0.87)
+  ✓ Fuzzy match: 'w_b' → 'w/b' (score: 0.80)
+  ✓ Fuzzy match: 'Silica_fume_kg_m3' → 'Silica fume (Kg/m3)' (score: 0.90)
+  ✓ Fuzzy match: 'Fresh_density_kg_m3' → 'Fresh density (kg/m3)' (score: 0.91)
+  ✓ Fuzzy match: 'Metakaolin_kg_m3' → 'Metakaolin
+(Kg/m3)' (score: 0.93)
+  ✗ No match: 'Specimen_temperature_C'
+  ✗ No match: 'Air_content_percent'
+  ✓ Fuzzy match: 'Dnssm_x1e_12_m2_s' → 'Dnssm
+( x10 ^-12 m2/s)' (score: 0.80)
+  ✗ No match: 'Cathode_NaCl_mass_percent'
+  ✗ No match: 'Recycled_agg_kg_m3'
+  ✗ No match: 'Spread_mm'
+  ✗ No match: 'Fine_agg_kg_m3'
+
+Tier 2: LLM Alignment (11 unmatched columns)
+
+  Calling LLM for semantic column alignment...
+    ✓ LLM matched: 'Anode_NaOH_M' → 'Anode
+solution
+(NaOH )
+M'
+    ✓ LLM matched: 'Silver_nitrate_M' → 'silver nitrate solution
+M'
+    ✓ LLM matched: 'Total_agg_kg_m3' → 'Total aggregate
+(Kg/m3)'
+    ✓ LLM matched: 'Age_at_strength_test_days' → 'Concrete age at compressive strength test (days)'
+    ✓ LLM matched: 'Coarse_agg_kg_m3' → 'Coarse aggregate  (Kg/m3)'
+    ✓ LLM matched: 'Specimen_temperature_C' → 'Temperature (ºC) OF specimen
+20–25 °C'
+    ✓ LLM matched: 'Air_content_percent' → 'Air content
+(%)'
+    ✓ LLM matched: 'Cathode_NaCl_mass_percent' → 'Cathode solution
+(NaCl  by mass)
+%'
+    ✓ LLM matched: 'Recycled_agg_kg_m3' → 'Recycled
+ aggregates
+(RA)'
+    ✓ LLM matched: 'Spread_mm' → 'Spreed
+(flow)  (mm)'
+    ✓ LLM matched: 'Fine_agg_kg_m3' → 'Fine aggregate   (Kg/m3)'
+
+  ✓ LLM aligned 11 columns successfully
+
+✓ All columns aligned (28/28)
+
+✓ Using aligned dataframe with 28 mapped columns
+================================================================================
+
+✓ Validation complete
+
+Validation Results:
+  Pass Rate: 60.0%
+  Accepted: 230/403 rows
+  Outputs: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\validation/
+  Clean Data: C:\Users\majdi\OneDrive\Bureau\Important\New folder\main-master\minimal_modular\NT Build 492\Results\validated_data.json
+================================================================================
+
+=== Cache Statistics ===
+  surya   :  134 files, 9.44 MB
+  gpt     :  130 files, 3.26 MB
+  schema  :    3 files, 0.02 MB
+  TOTAL   :  267 files, 12.72 MB
+
+Done!

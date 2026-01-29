@@ -51,11 +51,12 @@ export default function Dashboard() {
             trend={{ value: 15, isPositive: true }}
           />
           <StatusCard
-            title="Articles Processed"
-            value={counts.articlesProcessed}
+            title="Sources Processed"
             icon={FileText}
-            variant="success"
-            trend={{ value: 23, isPositive: true }}
+            value={counts.sourcesProcessed}
+            description="Total sources crawled and processed"
+            trend={{ value: 0, isPositive: true }}
+            trendLabel="sources"
           />
           <StatusCard
             title="Export Files"

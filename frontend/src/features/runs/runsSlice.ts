@@ -1,5 +1,5 @@
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { RunsAPI, Run, type Paged, type RunsQuery } from "./api";
+import { RunsAPI, Run, type CreateRunPayload, type Paged, type RunsQuery } from "./api";
 
 export type RunsState = {
   items: Run[];
@@ -8,6 +8,7 @@ export type RunsState = {
   pageSize: number;
   q: string;
   sort?: string;
+  all?: boolean;
   loading: boolean;
   error?: string;
   creating: boolean;
@@ -20,6 +21,7 @@ const initialState: RunsState = {
   pageSize: 10,
   q: "",
   sort: undefined,
+  all: false,
   loading: false,
   error: undefined,
   creating: false,
@@ -34,6 +36,7 @@ export const fetchRuns = createAsyncThunk<Paged<Run>, Partial<RunsQuery> | undef
       pageSize: query?.pageSize ?? state.pageSize,
       q: (query?.q ?? state.q) || undefined,
       sort: query?.sort ?? state.sort,
+      all: query?.all ?? state.all,
     };
     return await RunsAPI.list(params);
   }
@@ -61,17 +64,7 @@ export const exportRun = createAsyncThunk("runs/export", async (id: string) => {
 
 export const createRun = createAsyncThunk(
   "runs/create",
-  async (payload: {
-    name: string;
-    llmProvider: string;
-    searchMethods: string[];
-    searchQueries: string[];
-    links?: string[];
-    aggregationLinksCount?: number;
-    prompt?: string;
-    tableFileUrl?: string;
-    perLinkPrompt?: string;
-  }) => {
+  async (payload: CreateRunPayload) => {
     return await RunsAPI.create(payload);
   }
 );
@@ -97,6 +90,10 @@ const runsSlice = createSlice({
       state.sort = action.payload;
       state.page = 1;
     },
+    setAll(state, action: PayloadAction<boolean>) {
+      state.all = action.payload;
+      state.page = 1;
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -118,17 +115,17 @@ const runsSlice = createSlice({
       .addCase(pauseRun.fulfilled, (state, action) => {
         const id = action.payload;
         const item = state.items.find((r) => r.id === id);
-        if (item) item.status = "PAUSED";
+        if (item) item.status = "paused";
       })
       .addCase(resumeRun.fulfilled, (state, action) => {
         const id = action.payload;
         const item = state.items.find((r) => r.id === id);
-        if (item) item.status = "PROCESSING";
+        if (item) item.status = "running";
       })
       .addCase(stopRun.fulfilled, (state, action) => {
         const id = action.payload;
         const item = state.items.find((r) => r.id === id);
-        if (item) item.status = "FAILED";
+        if (item) item.status = "aborted";
       })
       .addCase(createRun.pending, (state) => {
         state.creating = true;
@@ -145,5 +142,5 @@ const runsSlice = createSlice({
   },
 });
 
-export const { setRuns, setPage, setPageSize, setQuery, setSort } = runsSlice.actions;
+export const { setRuns, setPage, setPageSize, setQuery, setSort, setAll } = runsSlice.actions;
 export default runsSlice.reducer;

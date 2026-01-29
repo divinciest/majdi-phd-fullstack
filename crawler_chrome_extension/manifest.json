@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "CreteXtract Crawler",
+  "description": "Browser crawler for CreteXtract Deep Research: fetches crawl jobs, extracts page HTML, and submits results.",
+  "version": "1.0.0",
+  "icons": {
+    "16": "logo/logo-16.png",
+    "48": "logo/logo-48.png",
+    "128": "logo/logo-128.png"
+  },
+  "action": {
+    "default_title": "CreteXtract Crawler",
+    "default_popup": "pages/login.html"
+  },
+  "permissions": [
+    "scripting",
+    "tabs",
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "offscreen",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://127.0.0.1:5007/*",
+    "http://localhost/*",
+    "http://localhost:5007/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "js": ["foreground.js"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ]
+}

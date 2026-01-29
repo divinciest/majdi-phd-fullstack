@@ -79,7 +79,7 @@ If validation fails after all retries, LLM generates a detailed rejection commen
 
 ```
 output/
-├── articles/
+├── sources/
 │   ├── Paper1.csv              # Per-paper extracted data
 │   ├── Paper1_rejection.txt    # Rejection comment (if rejected)
 │   └── Paper2.csv

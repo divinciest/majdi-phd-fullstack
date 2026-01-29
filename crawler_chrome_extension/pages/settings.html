@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Settings - CreteXtract Crawler</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+  <div class="page page-wide">
+    <!-- Header -->
+    <header class="header" style="display: flex; justify-content: space-between; align-items: center; text-align: left;">
+      <div>
+        <h1>CreteXtract Crawler</h1>
+        <p class="subtitle">Extension Settings</p>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span id="user-email" class="text-muted"></span>
+        <button id="logout-btn" class="btn btn-outline btn-small">Sign Out</button>
+      </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="nav">
+      <a href="dashboard.html" class="nav-link">Dashboard</a>
+      <a href="settings.html" class="nav-link active">Settings</a>
+      <a href="history.html" class="nav-link">History</a>
+    </nav>
+
+    <!-- Settings Form -->
+    <div class="card">
+      <div class="card-header">
+        <h2>Server Configuration</h2>
+      </div>
+      <div class="card-body">
+        <div class="form-group">
+          <label for="server-url">Backend URL</label>
+          <input type="url" id="server-url" placeholder="http://localhost:5007">
+          <p class="help-text">URL of your CreteXtract backend server</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Polling Settings</h2>
+      </div>
+      <div class="card-body">
+        <div class="form-group" style="display: flex; align-items: center; gap: 16px;">
+          <label class="toggle">
+            <input type="checkbox" id="polling-enabled">
+            <span class="toggle-slider"></span>
+          </label>
+          <div>
+            <div style="font-weight: 500;">Enable Auto Polling</div>
+            <div class="text-muted" style="font-size: 0.8rem;">Automatically check for new crawl jobs</div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="poll-interval">Poll Interval (seconds)</label>
+          <input type="number" id="poll-interval" min="10" max="300" value="30" style="width: 120px;">
+          <p class="help-text">How often to check for new jobs (10-300 seconds)</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Crawl Behavior</h2>
+      </div>
+      <div class="card-body">
+        <div class="form-group" style="display: flex; align-items: center; gap: 16px;">
+          <label class="toggle">
+            <input type="checkbox" id="auto-close-tab">
+            <span class="toggle-slider"></span>
+          </label>
+          <div>
+            <div style="font-weight: 500;">Auto-close Tabs</div>
+            <div class="text-muted" style="font-size: 0.8rem;">Close tabs after crawling completes</div>
+          </div>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 16px;">
+          <label class="toggle">
+            <input type="checkbox" id="redirect-detection">
+            <span class="toggle-slider"></span>
+          </label>
+          <div>
+            <div style="font-weight: 500;">Redirect Detection</div>
+            <div class="text-muted" style="font-size: 0.8rem;">Wait for JavaScript redirects to complete</div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="redirect-min-text">Minimum Content Length (chars)</label>
+          <input type="number" id="redirect-min-text" min="100" max="10000" value="3000" style="width: 120px;">
+          <p class="help-text">Minimum text length to consider page loaded</p>
+        </div>
+
+        <div class="form-group">
+          <label for="redirect-max-wait">Max Redirect Wait (ms)</label>
+          <input type="number" id="redirect-max-wait" min="1000" max="60000" value="30000" style="width: 120px;">
+          <p class="help-text">Maximum time to wait for redirects</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Save Button -->
+    <div style="text-align: center; margin-top: 20px;">
+      <button id="save-btn" class="btn btn-primary" style="padding: 14px 40px;">
+        💾 Save Settings
+      </button>
+    </div>
+
+    <div id="save-status" class="alert alert-success hidden mt-4 text-center">
+      Settings saved successfully!
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

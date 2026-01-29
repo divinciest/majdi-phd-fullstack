@@ -1,0 +1,86 @@
+body {
+    background-color: #282c34; /* Darker background */
+    color: #abb2bf; /* Lighter text */
+    font-family: Arial, sans-serif;
+    width: 22rem; /* Increased width */
+    min-height: 10rem; /* Minimum height */
+    padding: 15px;
+    box-sizing: border-box;
+}
+
+.container h2 {
+    color: #61afef; /* Blueish color for heading */
+    text-align: center;
+    margin-top: 0;
+    margin-bottom: 15px;
+}
+
+.input-mode {
+    margin-bottom: 10px;
+    display: flex;
+    gap: 15px;
+}
+
+.input-mode label {
+    cursor: pointer;
+}
+
+#keyword-input-area label,
+#links-input-area label {
+    display: block;
+    margin-bottom: 5px;
+    color: #98c379; /* Greenish color for labels */
+}
+
+#search-query,
+#url-list {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 10px;
+    border: 1px solid #3b4048; /* Darker border */
+    border-radius: 4px;
+    background-color: #21252b; /* Even darker input background */
+    color: #abb2bf; /* Lighter text for input */
+    box-sizing: border-box;
+}
+
+#url-list {
+    resize: vertical;
+}
+
+button#start-processing {
+    background-color: #61afef; /* Blueish button */
+    color: #282c34; /* Dark text on button */
+    border: none;
+    padding: 10px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    width: 100%;
+    font-size: 1em;
+    transition: background-color 0.3s ease;
+}
+
+button#start-processing:hover {
+    background-color: #5298d8; /* Slightly darker blue on hover */
+}
+
+button#start-processing:disabled {
+    background-color: #4a505a;
+    cursor: not-allowed;
+}
+
+#status-area {
+    margin-top: 15px;
+    padding: 8px;
+    background-color: #21252b;
+    border: 1px solid #3b4048;
+    border-radius: 4px;
+    min-height: 20px;
+    font-size: 0.9em;
+    white-space: pre-wrap; /* To respect newlines in status */
+    word-wrap: break-word;
+}
+
+.special-text {
+    color: #e06c75; /* Reddish color for special text */
+}

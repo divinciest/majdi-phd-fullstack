@@ -1,0 +1,711 @@
+
+Majdi Flah
+Attachments
+Jan 20, 2026, 7:56 PM (7 days ago)
+to me
+
+Hello Dhia,
+
+I am still running extractions. Please take a look at the attached text document to see where the extraction is right now.
+
+The process is lengthy.
+
+Can you please explain what's happening here? 
+
+Thanks,
+
+Majdi
+
+Majdi Flah, 
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+...
+
+[Message clipped]  View entire message
+ One attachment
+  •  Scanned by Gmail
+
+Majdi Flah
+Jan 20, 2026, 7:58 PM (7 days ago)
+to me
+
+The process has taken about 150 minutes so far, and is still running.
+
+Regards,
+
+Majdi
+
+Majdi Flah, 
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+...
+
+[Message clipped]  View entire message
+
+Majdi Flah
+Jan 21, 2026, 1:53 AM (6 days ago)
+to me
+
+Hello Dhia,
+
+I have validated study 10, and the row count is now accurate.
+
+The primary issues are as follows:
+1. The user needs to specify the expected data type for each column. For example, this is where validation logic can be effectively applied.
+2. Another aspect requiring validation logic (which I previously shared with you) pertains to the w/b or w/c values; these should not exceed 1, given the range of concrete mixes available. In study 10, the large language model (LLM) erroneously provided values such as 55% or 45%, whereas they should be expressed as 0.45 or 0.55.
+3. I observed that some rows are empty. The LLM has only partially filled some rows, as shown in the screenshot with 14 batches and approximately 8 expected rows per batch.
+4. The symbols Ã˜100 x 50 still appear in the data.
+
+I will now proceed to run this validation on the remaining studies listed. With approximately 130 studies in total, I plan to apply the same process consistently.
+
+Subsequently, I will compile a comprehensive validation report applicable to all of the studies. 
+
+Best regards,
+
+Majdi
+
+image.png
+
+Majdi Flah, 
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+...
+
+[Message clipped]  View entire message
+
+mohameddhia hassen <mohameddhiahassen@gmail.com>
+Jan 21, 2026, 7:23 AM (6 days ago)
+to Majdi
+
+Hello majdi,
+
+
+The document i attached to the email above contain a detailed step by step explaination of what the llm is now doing
+
+It is :
+
+Building validation logic ( from prompt )
+Building row count logic ( from prompt )
+Multi vote on rows count
+Pick rows count
+Start extraction 
+Start validation 
+
+Extraction is in batch which i can turn off for some models, because this is very lengthy now. We did 105/8=13 extractions in total for study 10 i focused on accuracy this time 
+
+Please send more feedback and i will fix the other points
+
+
+Having 105 rows to extract cannot be done in single pass so the time is a tradeoff but of course we still can improve it
+
+
+As for the column misvalidated we can show in the interface how each rows was being validated and allow user to change that post extraction because these errors can always occur, also i may add further guards around validation logic inferance
+
+I am starting on frontend too now
+
+
+Please report to me in order of priority and criticality  the issues , i would love to see the priority and criticality score  of each issue.
+
+Regards
+...
+
+[Message clipped]  View entire message
+
+Majdi Flah
+Jan 21, 2026, 3:58 PM (6 days ago)
+to me
+
+Sounds good.
+
+Working on that.
+
+Please expect a return by the end of the day. 
+
+I started running this on more studies. I am now running study 11-31. 
+
+Once this test is complete, I will return with a larger validation report.
+
+Thanks,
+
+Majdi
+
+Majdi Flah, EIT, M.Sc.
+• Engineering & Design | Durisol North America
+• Civil/Structural Engineer in Training 
+• McMaster University Incoming Ph.D. student
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+
+
+...
+
+[Message clipped]  View entire message
+
+mohameddhia hassen <mohameddhiahassen@gmail.com>
+Jan 21, 2026, 10:58 PM (6 days ago)
+to Majdi
+
+Hello majdi how is the progress
+
+
+Regards
+
+Majdi Flah
+Attachments
+Jan 22, 2026, 1:46 AM (5 days ago)
+to me
+
+Hello Dhia,
+I want to clearly document the issues observed after running the row-counting workflow on Studies 11–21 today, so we are aligned on the current state of the system.
+
+I've attached a file for a comparison of manual and LLM-extracted data. The Manual is numbered from [1] to [20]. Under each manual data subset, you will find its corresponding LLM.
+
+Despite introducing row counting, row mismatch problems persist, and several new issues have appeared that were not observed before applying this logic.
+
+Key issues observed:
+
+Row mismatch is still not resolved.
+In multiple studies, the judged row count does not match the number of rows actually extracted, and the pipeline continues without hard failure or recovery.
+
+Scope drift: extraction of test types other than NT Build 492.
+The LLM is now extracting rows from other durability tests (e.g., non-NT492 methods) to satisfy the target row count. This introduces out-of-scope data and is a critical issue for data integrity.
+
+Incomplete extractions.
+There are cases where batches return fewer rows than requested (including zero-row batches), yet the system proceeds as if extraction were complete. These partial extractions are not retried or flagged as failures.
+
+Computation time is not practical.
+I started running the pipeline today at 08:00 AM, beginning with Study 11, and I just finished Study 21 at 07:30 PM.
+That is almost 11 hours for 10 studies, or roughly ~1 hour per study, which is not scalable or usable in practice.
+
+Data normalization issues persist.
+The output still contains symbols and intervals (e.g., “>90”, “18-20”), indicating that normalization and coercion are not being enforced consistently.
+
+I wanted to communicate this clearly so we can decide how to fix these issues before continuing large-scale runs.
+
+Row-counting forensic analysis (Studies 11–21)
+
+The table below summarizes why different models reported different row counts and highlights cases where the judge selected an incorrect value.
+
+Study	Gemini Count	OpenAI Count	Anthropic Count	Judge Selection	Root Cause of Disagreement	Assessment of Judge Decision
+11	47	100	75	75	Gemini counted only the main table; OpenAI over-counted all numeric tables	InCorrect
+12	66	33	44	44	Gemini split age variants, OpenAI missed repeated tables	InCorrect
+13	24	96	24	96	OpenAI counted all numeric content; others undercounted.	Incorrect
+14	15	18	15	15	OpenAI included summary/stat rows	InCorrect
+15	15	25	5	15	Anthropic missed continuation, OpenAI expanded dimensions	InCorrect
+16	67	104	27	67	The judge selected a mid-range value despite low extractability	Incorrect
+17	60	36	36	36	Gemini included non-migration rows	Incorrect
+18	120	32	40	120	Gemini counted all numeric rows on paper	Incorrect
+19	76	201	57	76	OpenAI over-counted numeric content	Incorrect
+20	36	36	36	36	Full agreement across models	Incorrect
+21	56	31	15	15	The judge selected the lowest count despite partial tables	Incorrect
+This shows that:
+
+Different models are counting different structural interpretations of the paper.
+
+The judge is not always selecting the structurally correct number, and in several cases selects values that are not reproducible during extraction.
+
+Row counting alone does not guarantee correct or complete extraction and, in some cases, amplifies downstream errors.
+
+Summary
+Overall, the row-counting logic did not resolve the original issues and has introduced new failure modes, particularly:
+
+Scope leakage into non-NT492 tests
+
+Incomplete extractions without recovery
+
+Incorrect judge decisions
+
+Excessive runtime
+
+Before continuing large-scale runs, these issues need to be addressed at the system level, especially:
+
+Hard gating to NT Build 492 only
+
+Hard failure on row mismatch or incomplete batches
+
+Deterministic handling of symbols and intervals
+
+A substantial reduction in runtime per study
+
+I wanted to document this clearly so we can decide how to fix these issues before moving forward.
+
+Regarding the quality of the extracted data, the previous version was much better because I did not experience any incomplete extractions, or "panache," as it is said in French. 
+
+The row count presented a major issue in the previous version, but this version did not clearly address it. It worked on study 10, but when tested on a new set of papers, it failed due to data incompleteness issues.
+
+I was late just because I wanted to test this approach on the new 10 studies. I also conducted this approach on the previous 10 studies (1..10), and the results were worse than last time. New issues appear, such as the presence of SCM quantities, such as slag and silica fume, in the manual data, but the LLM omits this information.
+
+Regards,
+Majdi
+
+Majdi Flah, 
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+...
+
+[Message clipped]  View entire message
+ One attachment
+  •  Scanned by Gmail
+
+mohameddhia hassen <mohameddhiahassen@gmail.com>
+Jan 22, 2026, 1:53 AM (5 days ago)
+to Majdi
+
+Thanks for the update.
+
+
+The only things that wasn’t expected is “rows count still wrong” everything else is expected and required a run the explore this path. I wasn’t welling to put more time in fixing other issues ahead of time until i make sure rows count was fixed but here we are.
+
+Will revert to old pipeline and will use different approach for rows count.
+
+I wanted you please to share the actual expected count because that will help define if judge is wrong or all llm are wrong.
+
+Regards
+
+
+
+Regards
+
+
+
+
+
+mark rows as “global spatial outliers”,
+
+optionally feed back into retry/self-correction,
+
+or lower confidence scores for review.
+
+Motivation
+In legitimate exp
+
+
+Majdi Flah
+Attachments
+Jan 22, 2026, 2:33 AM (5 days ago)
+to me
+
+Hi Dhia,
+
+Attached are the expected row counts for each study.
+
+Regards,
+
+Majdi
+
+Majdi Flah, 
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+...
+
+[Message clipped]  View entire message
+ One attachment
+  •  Scanned by Gmail
+
+mohameddhia hassen <mohameddhiahassen@gmail.com>
+Jan 22, 2026, 2:44 AM (5 days ago)
+to Majdi
+
+This is very helpful
+
+Why for example study 14 the judge correctly said there should be 15 rows but you said that was wrong in previous email. I am wondering if there is more to know
+
+Regards
+
+
+
+
+Regards
+
+
+
+
+
+On Sat, Jan 17, 2026, 8:06 a.m. mo
+
+Majdi Flah
+Jan 22, 2026, 2:52 AM (5 days ago)
+to me
+
+These are studies 11-21.
+
+I tried to create a uniform validation file.
+
+Even if you see valid_11.txt and valid_20.txt, there are no differences, since it is not practical to keep changing validation files.
+
+As for the table, I sent in my previous email, I might have made a mistake in commenting abiut the row count. The correct row count is listed in the Manual_rows.xlsx file.
+
+Regards,
+
+Majdi
+ 11-21.zip
+
+Majdi Flah, EIT, M.Sc.
+• Engineering & Design | Durisol North America
+• Civil/Structural Engineer in Training 
+• McMaster University Incoming Ph.D. student
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+
+
+...
+
+[Message clipped]  View entire message
+ One attachment
+  •  Scanned by Gmail
+
+mohameddhia hassen <mohameddhiahassen@gmail.com>
+Jan 22, 2026, 2:55 AM (5 days ago)
+to Majdi
+
+I am asking if study 14 has 15 rows expected and judge llm picked 15 but in the comparative table two emails ago you said it was a wrong judgment. Then, i am wondering what was wrong about it for that case because maybe there is something i am missing? or now you are saying that the llm was right for study 14 ? ( for rows count judgement specifically)
+
+Regards
+
+
+
+
+
+Regards
+
+
+
+
+
+Hi Dhia,
+
+Majdi Flah
+Jan 22, 2026, 3:09 AM (5 days ago)
+to me
+
+My bad, the row count in study 14 is correct. Both manual and LLM extractions yielded 15 rows.
+
+Please just look at the numbers. The comments in the table attached (three email ago) might be erroneous.
+
+Regards,
+
+
+Majdi Flah, EIT, M.Sc.
+• Engineering & Design | Durisol North America
+• Civil/Structural Engineer in Training 
+• McMaster University Incoming Ph.D. student
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+
+...
+
+[Message clipped]  View entire message
+
+mohameddhia hassen <mohameddhiahassen@gmail.com>
+Jan 22, 2026, 3:13 AM (5 days ago)
+to Majdi
+
+we can get back the to old pipeline, remove batch but keep row count inferences.. to do that i need to know from you what kind exactly of miss judgment the llm has on rows count ( you can see its rows description in the json file of the intermediate phase , ask the IDE to find it for you ) if you can point the ki and of logical vs attention .. errors that would help really
+
+Will continue to work
+
+Regards 
+
+
+
+
+
+
+Regards
+
+
+
+
+
+On Sat, Jan 17, 2026 at 3:31 PM Majdi Flah <flahmajdi@gmail.com> wrote:
+
+
+Majdi Flah
+Jan 22, 2026, 4:14 AM (5 days ago)
+to me
+
+Sure! 
+
+I will get back to you shortly.
+
+Regards,
+
+Majdi
+
+Majdi Flah, EIT, M.Sc.
+• Engineering & Design | Durisol North America
+• Civil/Structural Engineer in Training 
+• McMaster University Incoming Ph.D. student
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+
+
+...
+
+[Message clipped]  View entire message
+
+Majdi Flah
+Jan 22, 2026, 4:59 AM (5 days ago)
+to me
+
+Hi Dhia,
+
+I investigated Study 18 in detail, and the “120 rows vs 40 rows” issue is not a numerical extraction error; it is a row-definition error.
+
+The LLM’s row logic (from the JSON) was:
+
+The LLM’s row logic (from the JSON) indicates there are 20 unique mixes, each a combination of Pumice (0, 10, 20, 40, 60%) and Silica Fume (0, 3, 6, 9%).
+
+Compressive strength reported at 6 ages (3, 7, 28, 90, 180, 365 days)
+→ 20 × 6 = 120 Mix + Age combinations
+
+This equation is consistent with Table 4, so the 120 is not “wrong” if the target output were compressive strength.
+
+However, our validation row count must be driven by the primary target variable, which is the diffusion coefficient D. In this paper, D is not tabulated; it is provided only in Figures 11 and 12, and only for 28 and 90 days. The manual extraction therefore, digitized D at 2 ages for 20 mixes:
+→ 20 × 2 = 40 rows
+
+So for validation purposes, the correct row count is 40, because only those 40 rows correspond to the D output we are collecting.
+
+Proposed rule to avoid this class of errors going forward:
+
+Row count priority is based on the target durability coefficient (D / Dapp / Dnssm, depending on the branch), not on compressive strength or any auxiliary table.
+
+The dataset row count must be defined solely by the number of observations for which that target coefficient is explicitly reported (in tables or digitizable figures), including the specific ages/exposure durations at which it is reported.
+
+If you implement this rule, Study 18 becomes deterministic: ignore the 6-age compressive-strength matrix for row counting, and count only the two D ages shown in the figures.
+
+Regards,
+
+image.pngimage.png
+Majdi Flah, 
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+...
+
+[Message clipped]  View entire message
+
+Majdi Flah
+Jan 22, 2026, 5:28 AM (5 days ago)
+to me
+
+Hi Dhia,
+
+I wish to highlight a crucial problem in the row-count logic that requires a conceptual fix rather than a case-by-case approach.
+
+In the current output of Study 16, the following logic was used:
+
+"logic": "identified nine unique concrete mixes (C0-C8) tested at three ages (7, 28, 90 days) for strength and chloride migration, yielding 27 rows. Additionally, eight unique mortar mixes for AAR testing (varying glass powder % and aggregate blends) were measured at 5 time points (4, 7, 11, 14, 21 days), yielding 40 rows."
+
+The first part of this logic is correct. The 27 rows (9 concrete mixes × three ages) are enough and complete for the task because they match the concrete mixtures tested for compressive strength and chloride migration, which is the durability aspect we care about.
+
+The issue arises with the second part. The inclusion of alkali-aggregate reaction (AAR)-related mortar tests is not acceptable for this pipeline. Although AAR is a durability mechanism, it represents a different degradation process, applied to a different material system (mortar rather than concrete), with different objectives and time logic. Once the target durability index (chloride migration) has been identified and populated, extraction must terminate. Additional durability tests must not generate new rows unless explicitly requested.
+
+There is also an important reporting constraint in this paper: the chloride-related values are not presented in tables but appear only in figures. Since CreteXtract is table-driven and schema-driven, values reported exclusively in figures must not trigger row creation unless figure digitization is explicitly enabled. In this case, no such instruction was given, so figure-based values should be detected and flagged rather than used to expand the row count.
+
+In the future, the rules need to be explicit:
+
+Once the target durability mechanism and coefficient are identified and fully populated, extraction must stop.
+
+Other durability tests, even if present in the same paper, must be ignored unless explicitly requested.
+
+Data presented only in figures should be flagged, not converted into rows by default.
+
+I can also filter out papers that don't show D in figure format. Given the limited time frame, we will work only on tables and text data (I will ensure figure digitization is excluded from the scope of this paper).
+
+This aspect is essential to avoid row inflation and cross-mechanism contamination, especially since these datasets are intended for ML modelling and service-life analysis.
+
+Let's align on this logic so we do not keep revisiting the same issue across papers.
+
+Best regards,
+
+Majdi
+
+Majdi Flah, 
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+...
+
+[Message clipped]  View entire message
+
+mohameddhia hassen <mohameddhiahassen@gmail.com>
+Jan 22, 2026, 12:02 PM (5 days ago)
+to Majdi
+
+Hello Majdi,
+
+As you've seen from the results, the LLM won't conclude anything for itself—you must tell it everything explicitly, otherwise it will fall back on default behavior which is not what we need.
+
+This is both good and bad:
+
+Bad: You will have to explicitly state everything in the row count logic description
+Good: This is also intellectual property for your PhD—defining these rules clearly is part of the research contribution
+Since I am continuing work on the frontend, I need you to thoroughly describe the row counting rules with an updated version that I can implement directly.
+
+Here's how we can minimize effort for the user:
+
+Predefined domain templates: User selects a template (e.g., "NT Build 492", "ASTM C1556")
+Progressive processing: User processes documents in batches, pauses after each batch
+Interactive feedback: User reviews mistakes and adds corrections
+Automatic prompt updates: System refines the row counting logic based on user feedback
+What I need from you now: Write the explicit, complete row counting logic for NT Build 492 that leaves nothing to interpretation. Include all constraints, exclusions, and stopping conditions.
+
+Once I have that, I'll implement it and we can test the progressive refinement workflow.
+
+Regards,
+Dhia
+
+...
+
+[Message clipped]  View entire message
+
+Majdi Flah
+Jan 22, 2026, 2:00 PM (5 days ago)
+to me
+
+Sounds good.
+
+I will be working on that today.
+
+But yeah, I like the idea of predefined models, such as NT Build 492 or ASTM C1556 to simplify the user's life.
+
+While, I can't 100% guarantee that I will be able to get any single validation rules, but I will do my best to mark the ones that determine whether a study is eligible or not, such as the row count issues.
+
+Regards,
+
+Majdi
+
+Majdi Flah, 
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+
+Majdi Flah
+Attachments
+Jan 23, 2026, 3:01 AM (4 days ago)
+to me
+
+Hello Dhia,
+
+Please take a look at the attached folder containing PDFs of the migration coefficient (Dnssm) in table format only (no figures).
+
+I also attached the row count logic, as you asked.
+
+We will keep refining until reaching satisfactory results.
+
+Regards,
+
+Majdi
+
+Majdi Flah, 
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+...
+
+[Message clipped]  View entire message
+ One attachment
+  •  Scanned by Gmail
+
+Majdi Flah
+Jan 23, 2026, 9:48 PM (4 days ago)
+to me
+
+Hello Dhia,
+
+Any news about data validation?
+
+Regards,
+
+Majdi
+
+Mobile phone:
+226-504-3175
+
+Email address:
+flahmajdi@gmail.com
+...
+
+[Message clipped]  View entire message
+
+mohameddhia hassen <mohameddhiahassen@gmail.com>
+Jan 23, 2026, 9:50 PM (4 days ago)
+to Majdi
+
+Hello majdi,
+
+I moved to frontend because it is lighter  abd i am still recovering health-wise.
+
+Will update you in 24h
+
+Regards 
+
+
+
+
+
+
+
+Regards
+
+
+
+
+
+Row count mismatch (over-extraction):
+
+
+mohameddhia hassen <mohameddhiahassen@gmail.com>
+Jan 25, 2026, 4:11 PM (2 days ago)
+to Majdi
+
+Hello majdi , i made good progress in frontend and today it will probably have end to end experience

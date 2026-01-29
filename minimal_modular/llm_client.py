@@ -202,7 +202,8 @@ def call_openai(
     user_prompt: str,
     use_cache: bool = True,
     cache_write_only: bool = False,
-    provider: Optional[str] = None
+    provider: Optional[str] = None,
+    model_override: Optional[str] = None
 ) -> dict:
     """
     Call LLM API (OpenAI, Gemini, Anthropic, or DeepSeek) with caching.
@@ -225,16 +226,16 @@ def call_openai(
     active_provider = provider or LLM_PROVIDER
     
     if active_provider == "openai":
-        model = OPENAI_MODEL
+        model = model_override or OPENAI_MODEL
         timeout = OPENAI_TIMEOUT_SECONDS
     elif active_provider == "gemini":
-        model = GEMINI_MODEL
+        model = model_override or GEMINI_MODEL
         timeout = GEMINI_TIMEOUT_SECONDS
     elif active_provider == "anthropic":
-        model = ANTHROPIC_MODEL
+        model = model_override or ANTHROPIC_MODEL
         timeout = ANTHROPIC_TIMEOUT_SECONDS
     elif active_provider == "deepseek":
-        model = DEEPSEEK_MODEL
+        model = model_override or DEEPSEEK_MODEL
         timeout = DEEPSEEK_TIMEOUT_SECONDS
     else:
         raise ValueError(f"Unknown provider: {active_provider}. Use 'openai', 'gemini', 'anthropic', or 'deepseek'")

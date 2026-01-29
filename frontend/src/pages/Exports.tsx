@@ -25,12 +25,8 @@ export default function Exports() {
 
   const handleDownload = async (id: number) => {
     try {
-      const res = await dispatch(downloadExport(String(id))).unwrap()
-      if (res.url) {
-        window.open(res.url, "_blank")
-      } else {
-        toast.error("Download URL not provided by server")
-      }
+      await dispatch(downloadExport(String(id))).unwrap()
+      toast.success("Download started")
     } catch (e: any) {
       toast.error("Failed to initiate download", { description: e?.message })
     }
@@ -60,7 +56,7 @@ export default function Exports() {
             <Badge variant="outline">
               {total} export file{total !== 1 ? "s" : ""}
             </Badge>
-            <Button size="sm" variant="ghost" onClick={() => dispatch(fetchExports())} disabled={loading}>
+            <Button size="sm" variant="ghost" onClick={() => dispatch(fetchExports(undefined))} disabled={loading}>
               <RefreshCcw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
           </div>
@@ -100,7 +96,7 @@ export default function Exports() {
                           <div className="flex items-center space-x-2">
                             <FileSpreadsheet className="h-4 w-4 text-success" />
                             <div>
-                              <div className="font-medium">{exp.filePath.split("/").pop() || exp.filePath.split("\\").pop()}</div>
+                              <div className="font-medium">{exp.filename}</div>
                               <div className="text-xs text-muted-foreground">ID: {exp.id}</div>
                             </div>
                           </div>

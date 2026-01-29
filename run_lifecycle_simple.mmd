@@ -1,0 +1,48 @@
+flowchart TD
+subgraph FE[Frontend]
+  FE_Create[Create run]
+  FE_Start[Start run]
+  FE_Retry[Retry run]
+  FE_View[View results]
+end
+
+subgraph API[Backend API]
+  API_Create[Create run]
+  API_Start[Start run]
+  API_Retry[Retry run]
+end
+
+subgraph CORE[Core pipeline]
+  INSTR[Load instructions]
+
+  SCHEMA_HDR[Read excel headers]
+  SCHEMA_CACHE{Schema cache hit and context hash matches}
+  SCHEMA_LLM[LLM build schema names and descriptions]
+  SCHEMA_FALLBACK[Fallback deterministic schema]
+  SCHEMA_DONE[Schema ready]
+
+  PROMPT[Build extraction prompt using schema descriptions]
+  LLM_EXTRACT[LLM extract data]
+  PARSE[Parse JSON]
+  NORM[Normalize rows to canonical schema]
+  OUT[Write outputs csv json mapping progress]
+end
+
+FE_Create --> API_Create
+API_Create --> OUT
+
+FE_Start --> API_Start
+API_Start --> INSTR
+INSTR --> SCHEMA_HDR
+SCHEMA_HDR --> SCHEMA_CACHE
+SCHEMA_CACHE -->|yes| SCHEMA_DONE
+SCHEMA_CACHE -->|no| SCHEMA_LLM --> SCHEMA_DONE
+SCHEMA_LLM -->|fail| SCHEMA_FALLBACK --> SCHEMA_DONE
+
+SCHEMA_DONE --> PROMPT
+PROMPT --> LLM_EXTRACT --> PARSE --> NORM --> OUT
+
+FE_Retry --> API_Retry
+API_Retry --> API_Start
+
+FE_View --> OUT

@@ -1,0 +1,70 @@
+import { http } from "@/lib/http";
+
+export type Source = {
+  id: string;
+  runId: string;
+  url?: string | null;
+  domain?: string;
+  title?: string;
+  sourceType?: "link" | "pdf";
+  status?: "PENDING" | "PROCESSING" | "READY" | "FAILED";
+  error?: string | null;
+  metaSourceId?: string | null;
+  createdAt?: string;
+  pdfFileId?: string | null;
+  pdfDownloadUrl?: string | null;
+};
+
+export type SourcePreview = {
+  id: string;
+  runId?: string;
+  url?: string;
+  domain?: string;
+  title?: string;
+  sourceType?: "link" | "pdf";
+  status?: "PENDING" | "PROCESSING" | "READY" | "FAILED";
+  error?: string | null;
+  metaSourceId?: string | null;
+  contentType?: string;
+  createdAt?: string;
+  htmlContent?: string;
+  pdfFileId?: string;
+  pdfDownloadUrl?: string | null;
+};
+
+export type SourcesQuery = {
+  q?: string;
+  domain?: string;
+  page?: number;
+  pageSize?: number;
+  sort?: string;
+};
+
+export type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };
+
+export const SourcesAPI = {
+  list: (params: SourcesQuery = {}) => {
+    const sp = new URLSearchParams();
+    if (params.q) sp.set("q", params.q);
+    if (params.domain) sp.set("domain", params.domain);
+    if (params.page) sp.set("page", String(params.page));
+    if (params.pageSize) sp.set("pageSize", String(params.pageSize));
+    if (params.sort) sp.set("sort", params.sort);
+    const qs = sp.toString();
+    return http<Paged<Source>>(`/sources${qs ? `?${qs}` : ""}`);
+  },
+  details: (id: string) => http<Source>(`/sources/${encodeURIComponent(id)}`),
+
+  listByRun: (runId: string, params: SourcesQuery = {}) => {
+    const sp = new URLSearchParams();
+    if (params.q) sp.set("q", params.q);
+    if (params.domain) sp.set("domain", params.domain);
+    if (params.page) sp.set("page", String(params.page));
+    if (params.pageSize) sp.set("pageSize", String(params.pageSize));
+    if (params.sort) sp.set("sort", params.sort);
+    const qs = sp.toString();
+    return http<Paged<Source>>(`/runs/${encodeURIComponent(runId)}/sources${qs ? `?${qs}` : ""}`);
+  },
+
+  preview: (sourceId: string) => http<SourcePreview>(`/sources/${encodeURIComponent(sourceId)}/preview`),
+};

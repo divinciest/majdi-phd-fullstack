@@ -44,3 +44,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+minimal_modular/uploads/**
+minimal_modular/ipc/*/*
+minimal_modular/config.py

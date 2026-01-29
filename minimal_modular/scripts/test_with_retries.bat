@@ -18,5 +18,5 @@ python extract.py ^
 
 echo.
 echo Output saved to: tests/data_validation_test/RETRY_TEST
-echo Check for rejection comments at: tests/data_validation_test/RETRY_TEST/articles/
+echo Check for rejection comments at: tests/data_validation_test/RETRY_TEST/sources/
 pause

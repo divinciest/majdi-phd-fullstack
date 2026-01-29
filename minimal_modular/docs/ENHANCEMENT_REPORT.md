@@ -127,7 +127,7 @@ python extract.py \
 output/
 ├── global_data.json          ← All extracted data
 ├── validated_data.json       ← Quality-checked data only
-├── articles/
+├── sources/
 │   ├── Paper1.csv
 │   └── Paper1_rejection.txt  ← Rejection explanation
 └── validation/

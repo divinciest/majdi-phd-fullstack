@@ -1,9 +1,10 @@
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
 import type { RootState } from "@/store/store";
-import { ConfigAPI, type ConfigEntry } from "./api";
+import { ConfigAPI, type ConfigEntry, type ConfigCategoryInfo } from "./api";
 
 export type ConfigState = {
   items: ConfigEntry[];
+  categories: ConfigCategoryInfo[];
   loading: boolean;
   error?: string;
   saving: boolean;
@@ -12,6 +13,7 @@ export type ConfigState = {
 
 const initialState: ConfigState = {
   items: [],
+  categories: [],
   loading: false,
   error: undefined,
   saving: false,
@@ -43,6 +45,18 @@ export const importConfig = createAsyncThunk<void, Record<string, string>>(
     await ConfigAPI.importConfig(data);
   }
 );
+
+export const resetConfig = createAsyncThunk<{ key: string; value: string }, string>(
+  "config/reset",
+  async (key) => {
+    const result = await ConfigAPI.reset(key);
+    return { key, value: result.value };
+  }
+);
+
+export const fetchCategories = createAsyncThunk<ConfigCategoryInfo[]>("config/fetchCategories", async () => {
+  return await ConfigAPI.categories();
+});
 
 const configSlice = createSlice({
   name: "config",
@@ -87,6 +101,16 @@ const configSlice = createSlice({
       .addCase(importConfig.rejected, (state, action) => {
         state.importing = false;
         state.error = action.error.message || "Failed to import config";
+      })
+      .addCase(resetConfig.fulfilled, (state, action) => {
+        const idx = state.items.findIndex((i) => i.key === action.payload.key);
+        if (idx >= 0) {
+          state.items[idx].value = action.payload.value;
+          state.items[idx].isUserOverride = false;
+        }
+      })
+      .addCase(fetchCategories.fulfilled, (state, action) => {
+        state.categories = action.payload;
       });
   },
 });

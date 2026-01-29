@@ -1,0 +1,144 @@
+flowchart TD
+
+subgraph FE[Frontend React]
+  FE_Runs[Runs table]
+  FE_Create[Create run]
+  FE_RunDetail[Run detail]
+  FE_RetryBtn[Retry]
+end
+
+subgraph API[Backend Flask API]
+  API_Create[POST runs pdf zip and excel schema]
+  API_CreateLinks[POST runs from links]
+  API_CreateSearch[POST runs from search]
+  API_Start[POST runs id start]
+  API_Retry[POST runs id retry]
+  API_GetRun[GET runs id]
+  API_ListRuns[GET runs]
+end
+
+subgraph FS[Disk]
+  UPLOADS[uploads run_id]
+  EXPORTS[exports run_id]
+  IPC[ipc run_id]
+  CACHE[cache]
+end
+
+subgraph DB[SQLite]
+  T_Runs[runs table]
+  T_Files[files table]
+  T_Crawl[crawl_jobs table]
+  T_Sources[sources table]
+end
+
+subgraph EXE[Extraction workers]
+  EXTRACT_PDF[extract.py]
+  EXTRACT_HTML[extract_html.py]
+end
+
+FE_Create -->|upload zip+schema| API_Create
+FE_Create -->|submit links+schema| API_CreateLinks
+FE_Create -->|submit search query+schema| API_CreateSearch
+
+FE_Runs -->|start| API_Start
+FE_RetryBtn -->|retry new run| API_Retry
+FE_Runs -->|list| API_ListRuns
+FE_RunDetail -->|get run| API_GetRun
+
+
+API_Create -->|mkdir uploads/export dirs| UPLOADS
+API_Create -->|mkdir uploads/export dirs| EXPORTS
+API_Create -->|save zip, extract PDFs, save schema xlsx| UPLOADS
+API_Create -->|register files| T_Files
+API_Create -->|insert run row pdfs_dir excel_path output_dir file IDs| T_Runs
+
+
+API_CreateLinks -->|mkdir uploads/export dirs| UPLOADS
+API_CreateLinks -->|mkdir uploads/export dirs| EXPORTS
+API_CreateLinks -->|save schema xlsx| UPLOADS
+API_CreateLinks -->|register schema file| T_Files
+API_CreateLinks -->|insert run row source_type links status crawling links JSON| T_Runs
+API_CreateLinks -->|create crawl_jobs| T_Crawl
+
+
+API_CreateSearch -->|mkdir uploads/export dirs| UPLOADS
+API_CreateSearch -->|mkdir uploads/export dirs| EXPORTS
+API_CreateSearch -->|save schema xlsx| UPLOADS
+API_CreateSearch -->|register schema file| T_Files
+API_CreateSearch -->|insert run row source_type deep_research status searching| T_Runs
+API_CreateSearch -->|background: Gemini search -> URLs -> crawl_jobs| T_Crawl
+API_CreateSearch -->|background: store deep_research_result + set status=crawling| T_Runs
+
+
+API_Start -->|ensure IPC dir| IPC
+API_Start -->|write instructions.txt if any| IPC
+
+API_Start -->|if source_type=pdf| EXTRACT_PDF
+API_Start -->|if source_type links or deep_research| EXTRACT_HTML
+
+
+EXTRACT_PDF -->|load instructions file| EXTRACT_PDF
+EXTRACT_PDF -->|infer_schema_from_excel excel instructions| SCHEMA
+EXTRACT_PDF -->|write schema_mapping.json| EXPORTS
+EXTRACT_PDF -->|write global_data.csv headers| EXPORTS
+EXTRACT_PDF -->|convert_pdf_to_text Surya plus LLM extract plus normalize| EXPORTS
+EXTRACT_PDF -->|update progress.json while running| EXPORTS
+EXTRACT_PDF -->|write global_data.json| EXPORTS
+
+
+EXTRACT_HTML -->|load instructions file| EXTRACT_HTML
+EXTRACT_HTML -->|infer_schema_from_excel excel instructions| SCHEMA
+EXTRACT_HTML -->|write schema_mapping.json| EXPORTS
+EXTRACT_HTML -->|read sources HTML from DB| T_Sources
+EXTRACT_HTML -->|LLM extract + normalize| EXPORTS
+EXTRACT_HTML -->|update progress.json while running| EXPORTS
+EXTRACT_HTML -->|write global_data.json| EXPORTS
+
+
+subgraph SCHEMA[Schema inference]
+  S0[Read Excel headers]
+  SCTX[Build engine_context + user instructions]
+  SCTXH[schemaContextHash sha256 context]
+
+  S_CACHE{Schema cache hit and schemaContextHash matches}
+  S_LLM[Single LLM call canonicalize and describe]
+  S_VALIDATE[Validate: lengths, uniqueness, mapping order]
+  S_FALLBACK[Fallback: deterministic canonical + generic descriptions]
+
+  S_WRITE[Return schema fields and mapping]
+end
+
+S0 --> SCTX --> SCTXH --> S_CACHE
+S_CACHE -->|yes| S_WRITE
+S_CACHE -->|no| S_LLM --> S_VALIDATE
+S_VALIDATE -->|ok| S_WRITE
+S_VALIDATE -->|fail| S_FALLBACK --> S_WRITE
+
+S_WRITE -->|set_schema_cache excel_hash| CACHE
+
+
+EXTRACT_PDF -->|stdout/stderr logs| IPC
+EXTRACT_HTML -->|stdout/stderr logs| IPC
+
+EXTRACT_PDF -->|on completion: count entries and update run status| T_Runs
+EXTRACT_HTML -->|on completion: count entries and update run status| T_Runs
+
+
+API_Retry -->|auth + ownership check| T_Runs
+API_Retry -->|create new run_id + dirs| UPLOADS
+API_Retry -->|create new run_id + dirs| EXPORTS
+API_Retry -->|copy schema file| UPLOADS
+API_Retry -->|register new schema file| T_Files
+
+API_Retry -->|if PDF: copy zip or reconstruct zip; extract PDFs| UPLOADS
+API_Retry -->|if PDF: register PDFs + zip file| T_Files
+API_Retry -->|insert new run row name plus Retry| T_Runs
+API_Retry -->|if Links: recreate crawl_jobs| T_Crawl
+API_Retry -->|if Deep Research: rerun query -> crawl_jobs| T_Crawl
+API_Retry -->|optional autoStart: spawn extraction| API_Start
+
+
+API_GetRun --> T_Runs
+API_ListRuns --> T_Runs
+FE_RunDetail -->|poll progress/logs| EXPORTS
+FE_RunDetail -->|view extracted data| EXPORTS

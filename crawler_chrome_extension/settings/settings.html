@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link rel="stylesheet" href="settings.css">
+    <title>CreteXtract Crawler</title>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>CreteXtract Crawler</h1>
+            <p class="subtitle">Chrome Extension for Deep Research</p>
+        </header>
+        
+        <!-- Connection Banner -->
+        <div id="connection-banner" class="banner banner-warning">
+            <span class="banner-icon">⚠️</span>
+            <span class="banner-text">Not connected to server</span>
+            <button id="test-connection-btn" class="btn btn-small">Test Connection</button>
+        </div>
+
+        <!-- Main Content - Two Column Layout -->
+        <div class="main-content">
+            <!-- Left Column: Auth & Server -->
+            <div class="column">
+                <!-- Server Configuration - FIRST so user sets it before login -->
+                <section class="card">
+                    <div class="card-header">
+                        <h2>Server</h2>
+                        <span id="server-status" class="status-badge status-unknown">Unknown</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label for="server-url">Backend URL</label>
+                            <div class="input-with-button">
+                                <input type="url" id="server-url" placeholder="http://localhost:5007">
+                                <button id="test-server-btn" class="btn btn-icon" title="Test connection">🔗</button>
+                            </div>
+                            <small class="help-text">URL of your CreteXtract backend server</small>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Authentication Section -->
+                <section class="card" id="auth-card">
+                    <div class="card-header">
+                        <h2>Authentication</h2>
+                        <span id="auth-badge" class="status-badge status-offline">Not logged in</span>
+                    </div>
+                    <div class="card-body">
+                        <!-- Login Form -->
+                        <div id="login-form">
+                            <p class="info-text">Login with your CreteXtract account to enable crawling.</p>
+                            <div class="form-group">
+                                <label for="email">Email</label>
+                                <input type="email" id="email" placeholder="your@email.com" autocomplete="email">
+                            </div>
+                            <div class="form-group">
+                                <label for="password">Password</label>
+                                <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+                            </div>
+                            <div id="login-error" class="error-box"></div>
+                            <button id="login-btn" class="btn btn-primary btn-full">
+                                <span class="btn-text">Sign In</span>
+                                <span class="btn-loading" style="display:none;">Signing in...</span>
+                            </button>
+                        </div>
+                        
+                        <!-- User Info (shown when authenticated) -->
+                        <div id="user-info" style="display: none;">
+                            <div class="user-card">
+                                <div class="user-avatar">👤</div>
+                                <div class="user-details">
+                                    <span class="user-email" id="user-email">user@example.com</span>
+                                    <span class="user-status">Authenticated</span>
+                                </div>
+                            </div>
+                            <button id="logout-btn" class="btn btn-outline btn-full">Sign Out</button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Right Column: Settings & Status -->
+            <div class="column">
+                <!-- Polling Settings -->
+                <section class="card">
+                    <div class="card-header">
+                        <h2>Polling</h2>
+                        <label class="toggle">
+                            <input type="checkbox" id="polling-enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label for="poll-interval">Check every</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="poll-interval" min="10" max="300" value="30">
+                                <span class="unit">seconds</span>
+                            </div>
+                        </div>
+                        <div class="quick-actions">
+                            <button id="poll-now-btn" class="btn btn-secondary" disabled>
+                                <span>🔄</span> Poll Now
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Live Status -->
+                <section class="card">
+                    <div class="card-header">
+                        <h2>Status</h2>
+                        <span id="crawler-status" class="status-badge status-idle">Idle</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-value" id="jobs-pending">0</span>
+                                <span class="stat-label">Pending</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="jobs-active">0</span>
+                                <span class="stat-label">Active</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="jobs-done">0</span>
+                                <span class="stat-label">Done</span>
+                            </div>
+                        </div>
+                        <div class="status-row">
+                            <span class="status-label">Last poll:</span>
+                            <span id="last-poll-time" class="status-value">Never</span>
+                        </div>
+                        <div class="status-row">
+                            <span class="status-label">Last result:</span>
+                            <span id="last-result" class="status-value">-</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Advanced Settings (Collapsible) -->
+                <details class="card collapsible">
+                    <summary class="card-header">
+                        <h2>Advanced Settings</h2>
+                        <span class="collapse-icon">▼</span>
+                    </summary>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="auto-close-tab">
+                                <span>Auto-close tabs after crawl</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="redirect-detection" checked>
+                                <span>Detect redirects</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="redirect-min-text">Min content length</label>
+                            <input type="number" id="redirect-min-text" min="100" max="10000" value="3000">
+                        </div>
+                        <div class="form-group">
+                            <label for="redirect-max-wait">Max redirect wait (ms)</label>
+                            <input type="number" id="redirect-max-wait" min="1000" max="60000" value="30000">
+                        </div>
+                        <button id="clear-logs-btn" class="btn btn-outline btn-small">Clear Logs</button>
+                    </div>
+                </details>
+            </div>
+        </div>
+
+        <!-- Footer Actions -->
+        <footer class="footer">
+            <button id="save-btn" class="btn btn-primary btn-large">
+                <span>💾</span> Save All Settings
+            </button>
+        </footer>
+    </div>
+    
+    <script src="settings.js"></script>
+</body>
+</html>

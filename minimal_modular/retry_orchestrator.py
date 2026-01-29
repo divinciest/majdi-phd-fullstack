@@ -114,6 +114,7 @@ def extract_with_retries(
     best_pass_rate = 0.0
     last_validation_summary = ""
     consecutive_failures = 0
+    consecutive_empty = 0
     
     for attempt in range(max_retries + 1):
         if attempt > 0:
@@ -166,6 +167,19 @@ def extract_with_retries(
             break
         
         print(f"      → Extracted {len(entries)} entries")
+
+        if (not validation_config_path) and max_retries > 0 and attempt < max_retries:
+            if len(entries) == 0:
+                consecutive_empty += 1
+                consecutive_failures += 1
+                user_prompt = (
+                    initial_prompt
+                    + "\n\nCRITICAL: Your previous response produced 0 entries. "
+                    + "You MUST extract at least one complete row if any relevant data exists. "
+                    + "Do not return empty arrays. Return ONLY valid JSON." 
+                )
+                continue
+            return entries, None
         
         # Validate if config provided and retries enabled
         if validation_config_path and max_retries > 0 and attempt < max_retries:

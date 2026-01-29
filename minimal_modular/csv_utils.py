@@ -7,7 +7,7 @@ from typing import List, Dict
 def ensure_output_dirs(output_base: str):
     """Create output directories."""
     base = Path(output_base)
-    (base / "articles").mkdir(parents=True, exist_ok=True)
+    (base / "sources").mkdir(parents=True, exist_ok=True)
 
 def write_csv_entries(path: str, entries: List[Dict], fieldnames: List[str], mode: str = "w"):
     """Write entries to CSV file.

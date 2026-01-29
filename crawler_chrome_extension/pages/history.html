@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>History - CreteXtract Crawler</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+  <style>
+    .history-item {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .history-item:last-child {
+      border-bottom: none;
+    }
+    .history-url {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      word-break: break-all;
+      margin-top: 4px;
+    }
+    .history-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page page-wide">
+    <!-- Header -->
+    <header class="header" style="display: flex; justify-content: space-between; align-items: center; text-align: left;">
+      <div>
+        <h1>CreteXtract Crawler</h1>
+        <p class="subtitle">Crawl History</p>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span id="user-email" class="text-muted"></span>
+        <button id="logout-btn" class="btn btn-outline btn-small">Sign Out</button>
+      </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="nav">
+      <a href="dashboard.html" class="nav-link">Dashboard</a>
+      <a href="settings.html" class="nav-link">Settings</a>
+      <a href="history.html" class="nav-link active">History</a>
+    </nav>
+
+    <!-- Actions -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div>
+        <span id="history-count" class="text-muted">0 items</span>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button id="refresh-btn" class="btn btn-secondary btn-small">🔄 Refresh</button>
+        <button id="clear-btn" class="btn btn-outline btn-small" style="color: var(--error);">🗑️ Clear All</button>
+      </div>
+    </div>
+
+    <!-- History List -->
+    <div class="card">
+      <div id="history-list" class="card-body" style="padding: 0; max-height: 500px; overflow-y: auto;">
+        <div class="text-muted text-center" style="padding: 40px;">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="history.js"></script>
+</body>
+</html>

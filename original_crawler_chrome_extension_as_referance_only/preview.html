@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HTML Preview</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #header {
+      background: #f5f5f5;
+      border-bottom: 1px solid #ddd;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    #status {
+      font-size: 13px;
+      color: #666;
+    }
+    #frame {
+      border: none;
+      width: 100%;
+      height: calc(100vh - 41px);
+    }
+    .btn {
+      padding: 6px 12px;
+      border: 1px solid #bbb;
+      background: #fff;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .btn:hover {
+      background: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <strong>HTML Preview</strong>
+    <span id="status">Loading...</span>
+    <button id="reload" class="btn">Reload</button>
+  </div>
+  <iframe id="frame" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe>
+  
+  <script src="preview.js"></script>
+</body>
+</html>

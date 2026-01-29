@@ -1,17 +1,17 @@
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { ArticlesAPI, type Article, type ArticlesQuery, type Paged } from "./api";
+import { SourcesAPI, type Source, type SourcesQuery, type Paged } from "./api";
 
-export type ArticlesState = {
-  items: Article[];
+export type SourcesState = {
+  items: Source[];
   total: number;
   page: number;
   pageSize: number;
   loading: boolean;
   error?: string;
-  query: ArticlesQuery;
+  query: SourcesQuery;
 };
 
-const initialState: ArticlesState = {
+const initialState: SourcesState = {
   items: [],
   total: 0,
   page: 1,
@@ -21,26 +21,26 @@ const initialState: ArticlesState = {
   query: { page: 1, pageSize: 20 },
 };
 
-export const fetchArticles = createAsyncThunk(
-  "articles/fetch",
-  async (params: ArticlesQuery | undefined, { getState }) => {
+export const fetchSources = createAsyncThunk(
+  "sources/fetch",
+  async (params: SourcesQuery | undefined, { getState }) => {
     const state = getState() as any;
     const q = {
-      page: state.articles?.page || 1,
-      pageSize: state.articles?.pageSize || 20,
-      ...(state.articles?.query || {}),
+      page: state.sources?.page || 1,
+      pageSize: state.sources?.pageSize || 20,
+      ...(state.sources?.query || {}),
       ...(params || {}),
-    } as ArticlesQuery;
-    const res = await ArticlesAPI.list(q);
-    return { res, q } as { res: Paged<Article>; q: ArticlesQuery };
+    } as SourcesQuery;
+    const res = await SourcesAPI.list(q);
+    return { res, q } as { res: Paged<Source>; q: SourcesQuery };
   }
 );
 
-const articlesSlice = createSlice({
-  name: "articles",
+const sourcesSlice = createSlice({
+  name: "sources",
   initialState,
   reducers: {
-    setQuery(state, action: PayloadAction<ArticlesQuery>) {
+    setQuery(state, action: PayloadAction<SourcesQuery>) {
       state.query = { ...state.query, ...action.payload };
     },
     setPage(state, action: PayloadAction<number>) {
@@ -55,11 +55,11 @@ const articlesSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      .addCase(fetchArticles.pending, (state) => {
+      .addCase(fetchSources.pending, (state) => {
         state.loading = true;
         state.error = undefined;
       })
-      .addCase(fetchArticles.fulfilled, (state, action) => {
+      .addCase(fetchSources.fulfilled, (state, action) => {
         const { res, q } = action.payload;
         state.loading = false;
         state.items = res.items;
@@ -68,12 +68,12 @@ const articlesSlice = createSlice({
         state.pageSize = res.pageSize;
         state.query = q;
       })
-      .addCase(fetchArticles.rejected, (state, action) => {
+      .addCase(fetchSources.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.error.message || "Failed to load articles";
+        state.error = action.error.message || "Failed to load sources";
       });
   },
 });
 
-export const { setQuery, setPage, setPageSize, reset } = articlesSlice.actions;
-export default articlesSlice.reducer;
+export const { setQuery, setPage, setPageSize, reset } = sourcesSlice.actions;
+export default sourcesSlice.reducer;

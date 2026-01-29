@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Login - CreteXtract Crawler</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+  <div class="page page-narrow">
+    <header class="header">
+      <img src="../logo/logo-128.png" alt="CreteXtract" class="logo">
+      <h1>CreteXtract Crawler</h1>
+      <p class="subtitle">Sign in to start crawling</p>
+    </header>
+
+    <div class="card">
+      <div class="card-body">
+        <!-- Server URL -->
+        <div class="form-group">
+          <label for="server-url">Server URL</label>
+          <input type="url" id="server-url" placeholder="http://localhost:5007">
+          <p class="help-text">Your CreteXtract backend server</p>
+        </div>
+
+        <div id="server-status" class="alert alert-warning hidden">
+          <span id="server-status-text">Checking server...</span>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid var(--border); margin: 20px 0;">
+
+        <!-- Login Form -->
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" placeholder="your@email.com" autocomplete="email">
+        </div>
+
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+        </div>
+
+        <div id="login-error" class="alert alert-error hidden"></div>
+
+        <button id="login-btn" class="btn btn-primary btn-full">
+          <span class="btn-text">Sign In</span>
+          <span class="btn-loading hidden"><span class="spinner"></span> Signing in...</span>
+        </button>
+      </div>
+    </div>
+
+    <p class="text-center text-muted" style="font-size: 0.8rem;">
+      Use the same credentials as your CreteXtract web app
+    </p>
+  </div>
+
+  <script src="login.js"></script>
+</body>
+</html>

@@ -1,10 +1,9 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
 import { 
   Table, 
   TableBody, 
@@ -19,84 +18,74 @@ import {
   Key, 
   Upload, 
   Download, 
-  Save, 
   RefreshCw,
-  Eye,
-  EyeOff,
-  AlertTriangle
+  AlertTriangle,
+  Cpu,
+  FileText,
+  Cog,
+  User
 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { useAppDispatch, useAppSelector } from "@/hooks/store"
-import { fetchConfig, importConfig as importConfigThunk, removeConfig, upsertConfig } from "@/features/config/configSlice"
-import type { ConfigEntry } from "@/features/config/api"
+import { fetchConfig, importConfig as importConfigThunk, removeConfig, upsertConfig, resetConfig } from "@/features/config/configSlice"
+import type { ConfigEntry, ConfigCategory } from "@/features/config/api"
+import { ConfigInput } from "@/components/config/ConfigInput"
 import { toast } from "sonner"
+
+const CATEGORY_INFO: Record<ConfigCategory, { label: string; icon: React.ElementType; description: string }> = {
+  general: { label: "General", icon: Settings, description: "General application settings" },
+  llm: { label: "LLM", icon: Cpu, description: "Language model configuration" },
+  extraction: { label: "Extraction", icon: FileText, description: "PDF extraction settings" },
+  api_keys: { label: "API Keys", icon: Key, description: "API keys and secrets" },
+  advanced: { label: "Advanced", icon: Cog, description: "Advanced settings" },
+};
 
 export default function Config() {
   const dispatch = useAppDispatch()
   const { items: config, loading, saving, importing, error } = useAppSelector((s) => s.config)
-  const [dirty, setDirty] = useState(false)
-  const [newKey, setNewKey] = useState("")
-  const [newValue, setNewValue] = useState("")
-  const [newDescription, setNewDescription] = useState("")
-  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set())
+  const [activeCategory, setActiveCategory] = useState<ConfigCategory>("llm")
   const [importData, setImportData] = useState("")
-
 
   useEffect(() => {
     dispatch(fetchConfig())
   }, [dispatch])
 
-  const getTypeVariant = (type: ConfigEntry["type"]) => {
-    switch (type) {
-      case "API_KEY": return "destructive"
-      case "TOGGLE": return "info"
-      case "PREFERENCE": return "warning"
-      case "URL": return "success"
-      default: return "secondary"
-    }
-  }
+  const configByCategory = useMemo(() => {
+    const grouped: Record<ConfigCategory, ConfigEntry[]> = {
+      general: [],
+      llm: [],
+      extraction: [],
+      api_keys: [],
+      advanced: [],
+    };
+    config.forEach((entry) => {
+      const cat = entry.category || "general";
+      if (grouped[cat]) grouped[cat].push(entry);
+      else grouped.general.push(entry);
+    });
+    return grouped;
+  }, [config]);
 
-  const toggleVisibility = (key: string) => {
-    const newHidden = new Set(hiddenKeys)
-    if (newHidden.has(key)) {
-      newHidden.delete(key)
-    } else {
-      newHidden.add(key)
-    }
-    setHiddenKeys(newHidden)
-  }
+  const categories = Object.keys(configByCategory).filter(
+    (cat) => configByCategory[cat as ConfigCategory].length > 0
+  ) as ConfigCategory[];
 
-  const handleSaveConfig = async () => {
+  const handleValueChange = async (entry: ConfigEntry, newValue: string) => {
     try {
-      // Save all entries currently in list (dirty tracking is superficial here)
-      await Promise.all(
-        config.map((entry) => dispatch(upsertConfig(entry)).unwrap())
-      )
-      setDirty(false)
-      toast.success("Configuration saved")
-      dispatch(fetchConfig())
+      await dispatch(upsertConfig({ key: entry.key, value: newValue })).unwrap()
+      toast.success(`${entry.key} updated`)
     } catch (e: any) {
-      toast.error("Failed to save configuration", { description: e?.message })
+      toast.error("Failed to update", { description: e?.message })
     }
   }
 
-  const handleAddEntry = () => {
-    if (!newKey || !newValue) return
-    
-    const newEntry: ConfigEntry = {
-      key: newKey,
-      value: newValue,
-      type: newKey.includes("API") ? "API_KEY" : "PREFERENCE",
-      description: newDescription || "User-defined configuration",
-      sensitive: newKey.includes("API") || newKey.includes("KEY"),
-      lastModified: new Date().toISOString()
+  const handleReset = async (key: string) => {
+    try {
+      await dispatch(resetConfig(key)).unwrap()
+      toast.success(`${key} reset to default`)
+    } catch (e: any) {
+      toast.error("Failed to reset", { description: e?.message })
     }
-    
-    dispatch(upsertConfig(newEntry))
-    setDirty(true)
-    setNewKey("")
-    setNewValue("")
-    setNewDescription("")
   }
 
   const handleImport = async () => {
@@ -139,7 +128,7 @@ export default function Config() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">System Configuration</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Manage global settings, API keys, and system preferences
+              Manage your settings, API keys, and preferences
             </p>
           </div>
           <div className="flex items-center space-x-2">
@@ -147,9 +136,9 @@ export default function Config() {
               <RefreshCw className="h-4 w-4 mr-2" />
               Reload
             </Button>
-            <Button size="sm" onClick={handleSaveConfig} disabled={saving}>
-              <Save className="h-4 w-4 mr-2" />
-              Save Changes
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="h-4 w-4 mr-2" />
+              Export
             </Button>
           </div>
         </div>
@@ -157,27 +146,44 @@ export default function Config() {
 
       {/* Content */}
       <div className="p-6">
-        <Tabs defaultValue="settings" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="settings">Configuration</TabsTrigger>
-            <TabsTrigger value="import-export">Import/Export</TabsTrigger>
-            <TabsTrigger value="add-new">Add New</TabsTrigger>
-          </TabsList>
+        <div className="flex gap-6">
+          {/* Category Sidebar */}
+          <div className="w-48 shrink-0 space-y-1">
+            {(Object.keys(CATEGORY_INFO) as ConfigCategory[]).map((cat) => {
+              const info = CATEGORY_INFO[cat];
+              const count = configByCategory[cat]?.length || 0;
+              if (count === 0) return null;
+              const Icon = info.icon;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+                    activeCategory === cat
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="flex-1 text-left">{info.label}</span>
+                  <Badge variant="secondary" className="text-xs">{count}</Badge>
+                </button>
+              );
+            })}
+          </div>
 
-          {/* Configuration Tab */}
-          <TabsContent value="settings">
+          {/* Config Entries */}
+          <div className="flex-1">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Settings className="h-5 w-5 mr-2" />
-                  Global Configuration Registry
+                <CardTitle className="flex items-center gap-2">
+                  {(() => {
+                    const Icon = CATEGORY_INFO[activeCategory].icon;
+                    return <Icon className="h-5 w-5" />;
+                  })()}
+                  {CATEGORY_INFO[activeCategory].label}
                 </CardTitle>
-                <div className="flex items-center space-x-2">
-                  <Badge variant="outline">{config.length} entries</Badge>
-                  <Badge variant="destructive">
-                    {config.filter(c => c.sensitive).length} sensitive
-                  </Badge>
-                </div>
+                <CardDescription>{CATEGORY_INFO[activeCategory].description}</CardDescription>
               </CardHeader>
               <CardContent>
                 {loading ? (
@@ -185,223 +191,69 @@ export default function Config() {
                 ) : error ? (
                   <div className="p-6 text-center text-destructive">{error}</div>
                 ) : (
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Key</TableHead>
-                        <TableHead>Value</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead>Last Modified</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {config.map((entry) => (
-                        <TableRow key={entry.key}>
-                          <TableCell>
-                            <div className="flex items-center space-x-2">
-                              {entry.sensitive && <Key className="h-3 w-3 text-destructive" />}
-                              <span className="font-mono text-sm">{entry.key}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center space-x-2 max-w-[200px]">
-                              {entry.type === "TOGGLE" ? (
-                                <Switch 
-                                  checked={entry.value === "true"}
-                                  onCheckedChange={async (checked) => {
-                                    await dispatch(upsertConfig({ ...entry, value: checked.toString(), lastModified: new Date().toISOString() }))
-                                  }}
-                                />
-                              ) : (
-                                <div className="flex items-center space-x-1 flex-1">
-                                  <span className="font-mono text-xs truncate">
-                                    {entry.sensitive && !hiddenKeys.has(entry.key)
-                                      ? entry.value.replace(/./g, '•')
-                                      : entry.value}
-                                  </span>
-                                  {entry.sensitive && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => toggleVisibility(entry.key)}
-                                    >
-                                      {hiddenKeys.has(entry.key) ? (
-                                        <Eye className="h-3 w-3" />
-                                      ) : (
-                                        <EyeOff className="h-3 w-3" />
-                                      )}
-                                    </Button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={getTypeVariant(entry.type)}>
-                              {entry.type}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <span className="text-sm text-muted-foreground">
-                              {entry.description}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">
-                              {new Date(entry.lastModified).toLocaleDateString()}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={async () => {
-                                  const newVal = prompt(`Update value for ${entry.key}`, entry.value)
-                                  if (newVal == null) return
-                                  await dispatch(upsertConfig({ ...entry, value: newVal, lastModified: new Date().toISOString() }))
-                                  toast.success("Entry updated")
-                                }}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={async () => {
-                                  if (!confirm(`Delete ${entry.key}?`)) return
-                                  await dispatch(removeConfig(entry.key))
-                                  toast.success("Entry removed")
-                                }}
-                              >
-                                Delete
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                  <div className="space-y-6">
+                    {configByCategory[activeCategory]?.map((entry) => (
+                      <div key={entry.key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="flex items-center gap-2">
+                            {entry.sensitive && <Key className="h-3 w-3 text-destructive" />}
+                            <span className="font-mono">{entry.key}</span>
+                            {entry.isUserOverride && (
+                              <Badge variant="outline" className="text-xs">
+                                <User className="h-3 w-3 mr-1" />
+                                Custom
+                              </Badge>
+                            )}
+                          </Label>
+                          {entry.required && <Badge variant="destructive">Required</Badge>}
+                        </div>
+                        <ConfigInput
+                          entry={entry}
+                          onChange={(value) => handleValueChange(entry, value)}
+                          onReset={() => handleReset(entry.key)}
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-muted-foreground">{entry.description}</p>
+                      </div>
+                    ))}
+                    {(!configByCategory[activeCategory] || configByCategory[activeCategory].length === 0) && (
+                      <div className="text-center text-muted-foreground py-8">
+                        No configuration entries in this category
+                      </div>
+                    )}
+                  </div>
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
 
-          {/* Import/Export Tab */}
-          <TabsContent value="import-export">
-            <div className="grid gap-6 md:grid-cols-2">
-            <Card>
+            {/* Import Section */}
+            <Card className="mt-6">
               <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Upload className="h-5 w-5 mr-2" />
+                <CardTitle className="flex items-center gap-2">
+                  <Upload className="h-5 w-5" />
                   Import Configuration
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Configuration Data (JSON or ENV format)</Label>
-                  <Textarea
-                    placeholder="Paste your configuration here..."
-                    value={importData}
-                    onChange={(e) => setImportData(e.target.value)}
-                    rows={8}
-                  />
-                </div>
-                
-                <div className="flex items-center space-x-2 p-3 bg-warning/10 rounded-md">
+                <Textarea
+                  placeholder='Paste JSON config, e.g. {"LLM_PROVIDER": "openai", "MAX_RETRIES": "5"}'
+                  value={importData}
+                  onChange={(e) => setImportData(e.target.value)}
+                  rows={4}
+                  className="font-mono text-sm"
+                />
+                <div className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-warning" />
-                  <span className="text-sm text-warning-foreground">
-                    Import will merge with existing configuration
-                  </span>
+                  <span className="text-sm text-muted-foreground">Import will merge with existing configuration</span>
                 </div>
-                
-                <Button onClick={handleImport} className="w-full" disabled={importing}>
+                <Button onClick={handleImport} disabled={importing || !importData.trim()}>
                   <Upload className="h-4 w-4 mr-2" />
-                  Import Configuration
+                  Import
                 </Button>
               </CardContent>
             </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Download className="h-5 w-5 mr-2" />
-                  Export Configuration
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Export current configuration as JSON file. Sensitive values will be included.
-                </p>
-                
-                <div className="space-y-2">
-                  <div className="text-sm">
-                    <span className="font-medium">Current entries:</span> {config.length}
-                  </div>
-                  <div className="text-sm">
-                    <span className="font-medium">Sensitive entries:</span> {config.filter(c => c.sensitive).length}
-                  </div>
-                </div>
-                
-                <Button onClick={handleExport} variant="outline" className="w-full">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export as JSON
-                </Button>
-              </CardContent>
-            </Card>
-            </div>
-          </TabsContent>
-
-          {/* Add New Tab */}
-          <TabsContent value="add-new">
-            <Card>
-              <CardHeader>
-                <CardTitle>Add New Configuration Entry</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="new-key">Configuration Key</Label>
-                    <Input
-                      id="new-key"
-                      placeholder="e.g., NEW_API_KEY"
-                      value={newKey}
-                      onChange={(e) => setNewKey(e.target.value)}
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="new-value">Value</Label>
-                    <Input
-                      id="new-value"
-                      placeholder="Configuration value"
-                      value={newValue}
-                      onChange={(e) => setNewValue(e.target.value)}
-                    />
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="new-description">Description (Optional)</Label>
-                  <Input
-                    id="new-description"
-                    placeholder="Brief description of this configuration"
-                    value={newDescription}
-                    onChange={(e) => setNewDescription(e.target.value)}
-                  />
-                </div>
-                
-                <Button onClick={handleAddEntry} disabled={!newKey || !newValue}>
-                  Add Configuration Entry
-                </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
       </div>
     </div>
   )
