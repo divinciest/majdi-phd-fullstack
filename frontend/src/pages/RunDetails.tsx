@@ -26,6 +26,7 @@ import {
   ExternalLink,
   ChevronDown,
   GitGraph,
+  RotateCcw,
 } from "lucide-react";
 import { WorkflowVisualization } from "@/components/workflow/WorkflowVisualization";
 import { RunsAPI, Run, LogsResponse, EngineStatus, IPCMetadata, EngineLogsResponse, RunProgress, SchemaMapping, RunExtractedDataResponse, RunInspectionResponse, ValidationResult } from "@/features/runs/api";
@@ -848,6 +849,21 @@ export default function RunDetails() {
     }
   };
 
+  const onRetry = async () => {
+    if (!id) return;
+    try {
+      const newRun = await RunsAPI.retry(id, true);
+      toast({ title: "Run retried", description: `New run created: ${newRun.name}` });
+      navigate(`/runs/${newRun.id}`);
+    } catch (err: any) {
+      toast({
+        title: "Retry failed",
+        description: err?.message || String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: `${label} copied to clipboard` });
@@ -992,6 +1008,12 @@ export default function RunDetails() {
               <Download className="h-4 w-4 mr-2" />
               Export
             </Button>
+            {(run.status === "failed" || run.status === "completed" || run.status === "aborted") && (
+              <Button variant="outline" size="sm" onClick={onRetry}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+            )}
           </div>
         </div>
       </div>

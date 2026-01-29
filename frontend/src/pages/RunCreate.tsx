@@ -117,7 +117,7 @@ export default function RunCreate() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   
   // Deep Research (search) mode state
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQueryFile, setSearchQueryFile] = useState<File | null>(null);
   const [searchExcelSchema, setSearchExcelSchema] = useState<File | null>(null);
   
   // Manual Links mode state
@@ -175,8 +175,8 @@ export default function RunCreate() {
   const onSubmitSearch = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!searchQuery.trim()) {
-      toast.error("Please enter a search query");
+    if (!searchQueryFile) {
+      toast.error("Please upload a search query file");
       return;
     }
 
@@ -187,9 +187,10 @@ export default function RunCreate() {
 
     setCreating(true);
     try {
+      const queryText = await searchQueryFile.text();
       const run = await RunsAPI.createFromSearch({
         name: name || "Deep Research Run",
-        query: searchQuery,
+        query: queryText,
         excelSchema: searchExcelSchema,
         llmProvider,
         extractionPrompt: extractionPromptFile || undefined,
@@ -243,7 +244,7 @@ export default function RunCreate() {
   };
 
   const isPdfValid = pdfsZip && excelSchema;
-  const isSearchValid = searchQuery.trim().length > 0 && searchExcelSchema;
+  const isSearchValid = searchQueryFile && searchExcelSchema;
   const isLinksValid = linksText.trim().length > 0 && linksExcelSchema;
 
   return (
@@ -476,13 +477,12 @@ export default function RunCreate() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="searchQuery">Search Query</Label>
-                    <Textarea
-                      id="searchQuery"
-                      rows={3}
-                      placeholder="e.g., Find recent research papers on machine learning optimization techniques..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                    <Label>Search Query (.txt file)</Label>
+                    <PromptFileUpload
+                      label="Search Query"
+                      description="Text file containing your research query for Gemini"
+                      value={searchQueryFile}
+                      onChange={setSearchQueryFile}
                     />
                   </div>
 

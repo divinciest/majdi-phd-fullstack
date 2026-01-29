@@ -3050,7 +3050,8 @@ def retry_run(run_id):
     src_zip_file_id = src.get("zip_file_id")
     src_schema_file_id = src.get("schema_file_id")
 
-    if not src_excel_path or not os.path.isfile(src_excel_path):
+    has_schema = src_excel_path and os.path.isfile(src_excel_path)
+    if not has_schema:
         conn.close()
         return jsonify({"error": "Source run is missing schema file on disk"}), 400
 
