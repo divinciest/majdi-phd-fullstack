@@ -2245,53 +2245,58 @@ def create_run_from_search():
             html_count = 0
             pdf_count = 0
             for link in unique_links:
-                url = link.get("url", "")
-                title = link.get("title", "")
-                if not url:
-                    continue
-                
-                # Check if PDF
-                url_lower = url.lower()
-                if url_lower.endswith('.pdf') or '/pdf/' in url_lower or 'pdf?' in url_lower:
-                    pdf_count += 1
-                    job_id = str(uuid.uuid4())
-                    cur3.execute("""
-                        INSERT INTO crawl_jobs (id, run_id, user_id, url, title, status, created_at)
-                        VALUES (?, ?, ?, ?, ?, 'PDF_PENDING', ?)
-                    """, (job_id, run_id, user_id, url, title, now))
+                try:
+                    url = link.get("url", "")
+                    title = link.get("title", "")
+                    if not url:
+                        continue
+                    
+                    # Check if PDF
+                    url_lower = url.lower()
+                    if url_lower.endswith('.pdf') or '/pdf/' in url_lower or 'pdf?' in url_lower:
+                        pdf_count += 1
+                        job_id = str(uuid.uuid4())
+                        cur3.execute("""
+                            INSERT INTO crawl_jobs (id, run_id, user_id, url, title, status, created_at)
+                            VALUES (?, ?, ?, ?, ?, 'PDF_PENDING', ?)
+                        """, (job_id, run_id, user_id, url, title, now))
 
-                    # Insert source immediately (PENDING)
-                    ensure_source_row(
-                        source_id=job_id,
-                        run_id=run_id,
-                        source_type="pdf",
-                        status="PENDING",
-                        url=url,
-                        title=title,
-                        crawl_job_id=job_id,
-                        pdf_file_id=None,
-                        meta_source_id=meta_source_id,
-                    )
-                else:
-                    job_id = str(uuid.uuid4())
-                    cur3.execute("""
-                        INSERT INTO crawl_jobs (id, run_id, user_id, url, title, status, created_at)
-                        VALUES (?, ?, ?, ?, ?, 'PENDING', ?)
-                    """, (job_id, run_id, user_id, url, title, now))
-                    html_count += 1
+                        # Insert source immediately (PENDING)
+                        ensure_source_row(
+                            source_id=job_id,
+                            run_id=run_id,
+                            source_type="pdf",
+                            status="PENDING",
+                            url=url,
+                            title=title,
+                            crawl_job_id=job_id,
+                            pdf_file_id=None,
+                            meta_source_id=meta_source_id,
+                            cur=cur3,
+                        )
+                    else:
+                        job_id = str(uuid.uuid4())
+                        cur3.execute("""
+                            INSERT INTO crawl_jobs (id, run_id, user_id, url, title, status, created_at)
+                            VALUES (?, ?, ?, ?, ?, 'PENDING', ?)
+                        """, (job_id, run_id, user_id, url, title, now))
+                        html_count += 1
 
-                    # Insert source immediately (PENDING)
-                    ensure_source_row(
-                        source_id=job_id,
-                        run_id=run_id,
-                        source_type="link",
-                        status="PENDING",
-                        url=url,
-                        title=title,
-                        crawl_job_id=job_id,
-                        pdf_file_id=None,
-                        meta_source_id=meta_source_id,
-                    )
+                        # Insert source immediately (PENDING)
+                        ensure_source_row(
+                            source_id=job_id,
+                            run_id=run_id,
+                            source_type="link",
+                            status="PENDING",
+                            url=url,
+                            title=title,
+                            crawl_job_id=job_id,
+                            pdf_file_id=None,
+                            meta_source_id=meta_source_id,
+                            cur=cur3,
+                        )
+                except Exception as link_err:
+                    log_message(f"Failed to create crawl job for {url[:100]}: {str(link_err)}", "ERROR", run_id)
             
             cur3.execute("UPDATE runs SET sources_count = ? WHERE id = ?", (html_count + pdf_count, run_id))
             conn3.commit()
@@ -3320,10 +3325,23 @@ def retry_run(run_id):
                     job_id = str(uuid.uuid4())
                     cur3.execute(
                         """
-                        INSERT INTO crawl_jobs (id, deep_research_id, user_id, url, title, status, created_at)
+                        INSERT INTO crawl_jobs (id, run_id, user_id, url, title, status, created_at)
                         VALUES (?, ?, ?, ?, '', 'PENDING', ?)
                         """,
                         (job_id, new_run_id, user_id, url, now),
+                    )
+                    # Insert source row
+                    ensure_source_row(
+                        source_id=job_id,
+                        run_id=new_run_id,
+                        source_type="link",
+                        status="PENDING",
+                        url=url,
+                        title="",
+                        crawl_job_id=job_id,
+                        pdf_file_id=None,
+                        meta_source_id=None,
+                        cur=cur3,
                     )
                 conn3.commit()
                 conn3.close()
