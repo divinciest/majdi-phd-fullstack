@@ -56,12 +56,6 @@ const navigation = [
     description: "Download generated reports"
   },
   {
-    name: "Domains",
-    href: "/domains",
-    icon: Globe,
-    description: "Domain analytics & statistics"
-  },
-  {
     name: "Cache",
     href: "/cache",
     icon: Database,

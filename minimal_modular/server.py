@@ -66,9 +66,11 @@ active_processes = {}  # run_id -> subprocess.Popen
 # ============================================================================
 
 def get_db():
-    """Get thread-local database connection."""
-    conn = sqlite3.connect(DB_PATH)
+    """Get thread-local database connection with timeout for concurrency."""
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 def init_db():

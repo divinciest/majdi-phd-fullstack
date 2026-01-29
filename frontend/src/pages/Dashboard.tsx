@@ -6,7 +6,6 @@ import {
   PlayCircle, 
   FileText, 
   Download, 
-  Globe, 
   TrendingUp,
   Clock
 } from "lucide-react"
@@ -64,13 +63,6 @@ export default function Dashboard() {
             icon={Download}
             variant="default"
             trend={{ value: 8, isPositive: true }}
-          />
-          <StatusCard
-            title="Domains Crawled"
-            value={counts.domainsCrawled}
-            icon={Globe}
-            variant="warning"
-            trend={{ value: 12, isPositive: true }}
           />
         </div>
 

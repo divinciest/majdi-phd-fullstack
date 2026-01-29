@@ -11,7 +11,6 @@ import Runs from "./pages/Runs";
 import RunDetails from "./pages/RunDetails";
 import Sources from "./pages/Sources";
 import Exports from "./pages/Exports";
-import Domains from "./pages/Domains";
 import Cache from "./pages/Cache";
 import Config from "./pages/Config";
 import NotFound from "./pages/NotFound";
@@ -45,7 +44,6 @@ const App = () => {
               <Route path="runs/:id" element={<RunDetails />} />
               <Route path="sources" element={<Sources />} />
               <Route path="exports" element={<Exports />} />
-              <Route path="domains" element={<Domains />} />
               <Route path="cache" element={<Cache />} />
               <Route path="config" element={<Config />} />
               <Route path="deep-research" element={<DeepResearch />} />
