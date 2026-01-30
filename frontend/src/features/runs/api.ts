@@ -355,4 +355,8 @@ export const RunsAPI = {
   exportPdf: (id: string) => http<{ url: string; filename: string; exportId: number }>(`/runs/${id}/export-pdf`, {
     method: "POST",
   }),
+
+  exportZip: (id: string) => http<{ url: string; filename: string; exportId: number }>(`/runs/${id}/export-zip`, {
+    method: "POST",
+  }),
 };

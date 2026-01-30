@@ -4144,6 +4144,193 @@ def export_run_pdf(run_id):
         "exportId": export_id
     })
 
+
+@app.route("/runs/<run_id>/export-zip", methods=["POST"])
+@optional_auth
+def export_run_zip(run_id):
+    """Export complete run package as ZIP file.
+    
+    Includes:
+    - All files from run output directory (PDFs, data files, schemas, etc.)
+    - Excel workbook with run metadata and related DB objects (sources, logs, etc.)
+    - Generated PDF report
+    """
+    import zipfile
+    import io
+    
+    try:
+        import openpyxl
+        from openpyxl.utils.dataframe import dataframe_to_rows
+    except ImportError:
+        return jsonify({"error": "openpyxl not installed. Run: pip install openpyxl"}), 500
+    
+    # Get run data
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name, status, source_type, sources_count, data_entries_count,
+               llm_provider, start_date, output_dir, validation_enabled
+        FROM runs WHERE id = ?
+    """, (run_id,))
+    row = cur.fetchone()
+    
+    if not row:
+        conn.close()
+        return jsonify({"error": "Run not found"}), 404
+    
+    run_data = dict(row)
+    output_dir = run_data.get('output_dir')
+    run_name = run_data.get('name', 'run').replace(' ', '_')[:30]
+    
+    if not output_dir or not os.path.isdir(output_dir):
+        conn.close()
+        return jsonify({"error": "Run output directory not found"}), 404
+    
+    # Get related objects from DB
+    # Sources
+    cur.execute("""
+        SELECT id, filename, original_url, status, crawl_status, file_type, 
+               page_count, extracted_text_length, created_at
+        FROM sources WHERE run_id = ?
+    """, (run_id,))
+    sources = [dict(r) for r in cur.fetchall()]
+    
+    # Logs
+    cur.execute("""
+        SELECT id, created_at, level, message, run_id
+        FROM logs WHERE run_id = ? ORDER BY created_at DESC LIMIT 500
+    """, (run_id,))
+    logs = [dict(r) for r in cur.fetchall()]
+    
+    # Meta sources
+    cur.execute("""
+        SELECT id, method, query, result_count, created_at
+        FROM meta_sources WHERE run_id = ?
+    """, (run_id,))
+    meta_sources = [dict(r) for r in cur.fetchall()]
+    
+    # Exports
+    cur.execute("""
+        SELECT id, created_at, file_path
+        FROM exports WHERE run_id = ?
+    """, (run_id,))
+    exports = [dict(r) for r in cur.fetchall()]
+    
+    conn.close()
+    
+    # Create ZIP file in memory
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # Add all files from output directory
+        for root, dirs, files in os.walk(output_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, output_dir)
+                # Put in 'data/' subfolder
+                zf.write(file_path, f"data/{arcname}")
+        
+        # Create Excel workbook with run metadata and related objects
+        wb = openpyxl.Workbook()
+        
+        # Sheet 1: Run Overview
+        ws_run = wb.active
+        ws_run.title = "Run Overview"
+        ws_run.append(["Property", "Value"])
+        for key, value in run_data.items():
+            ws_run.append([str(key), str(value) if value is not None else ""])
+        
+        # Sheet 2: Sources
+        ws_sources = wb.create_sheet("Sources")
+        if sources:
+            headers = list(sources[0].keys())
+            ws_sources.append(headers)
+            for src in sources:
+                ws_sources.append([str(src.get(h, '')) for h in headers])
+        else:
+            ws_sources.append(["No sources found"])
+        
+        # Sheet 3: Meta Sources
+        ws_meta = wb.create_sheet("Meta Sources")
+        if meta_sources:
+            headers = list(meta_sources[0].keys())
+            ws_meta.append(headers)
+            for ms in meta_sources:
+                ws_meta.append([str(ms.get(h, '')) for h in headers])
+        else:
+            ws_meta.append(["No meta sources found"])
+        
+        # Sheet 4: Logs
+        ws_logs = wb.create_sheet("Logs")
+        if logs:
+            headers = list(logs[0].keys())
+            ws_logs.append(headers)
+            for log in logs:
+                ws_logs.append([str(log.get(h, '')) for h in headers])
+        else:
+            ws_logs.append(["No logs found"])
+        
+        # Sheet 5: Exports
+        ws_exports = wb.create_sheet("Exports")
+        if exports:
+            headers = list(exports[0].keys())
+            ws_exports.append(headers)
+            for exp in exports:
+                ws_exports.append([str(exp.get(h, '')) for h in headers])
+        else:
+            ws_exports.append(["No exports found"])
+        
+        # Save Excel to ZIP
+        excel_buffer = io.BytesIO()
+        wb.save(excel_buffer)
+        excel_buffer.seek(0)
+        zf.writestr("run_metadata.xlsx", excel_buffer.read())
+        
+        # Generate and add PDF report
+        try:
+            from report_generator import generate_report_from_run_dir
+            import tempfile
+            
+            pdf_path = os.path.join(tempfile.gettempdir(), f"report_{run_id}.pdf")
+            generate_report_from_run_dir(run_id, run_data, output_dir, pdf_path)
+            
+            if os.path.exists(pdf_path):
+                with open(pdf_path, 'rb') as pf:
+                    zf.writestr("run_report.pdf", pf.read())
+                os.remove(pdf_path)
+        except Exception as e:
+            # Add error note if PDF generation fails
+            zf.writestr("pdf_report_error.txt", f"Failed to generate PDF report: {e}")
+    
+    zip_buffer.seek(0)
+    
+    # Save ZIP to exports folder
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{run_name}_{timestamp}_complete.zip"
+    filepath = os.path.join(EXPORTS_FOLDER, filename)
+    
+    with open(filepath, 'wb') as f:
+        f.write(zip_buffer.read())
+    
+    # Record in DB
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO exports (run_id, created_at, file_path) VALUES (?, ?, ?)",
+        (run_id, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), filepath)
+    )
+    export_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    
+    log_message(f"ZIP export generated: {filename}", "INFO", run_id)
+    return jsonify({
+        "url": f"/exports/{export_id}/download",
+        "filename": filename,
+        "exportId": export_id
+    })
+
+
 # ============================================================================
 # API Routes - Config (per-user configuration)
 # ============================================================================

@@ -30,6 +30,7 @@ import {
   FastForward,
   Search,
   Globe,
+  Archive,
 } from "lucide-react";
 import { WorkflowVisualization } from "@/components/workflow/WorkflowVisualization";
 import { RunsAPI, Run, LogsResponse, EngineStatus, IPCMetadata, EngineLogsResponse, RunProgress, SchemaMapping, RunExtractedDataResponse, RunInspectionResponse, ValidationResult } from "@/features/runs/api";
@@ -905,6 +906,22 @@ export default function RunDetails() {
     }
   };
 
+  const onExportZip = async () => {
+    if (!id) return;
+    try {
+      toast({ title: "Generating ZIP package...", description: "This may take a moment" });
+      const result = await RunsAPI.exportZip(id);
+      toast({ title: "ZIP package ready", description: result.filename });
+      window.open(`${API_BASE_URL}${result.url}`, "_blank");
+    } catch (err: any) {
+      toast({
+        title: "ZIP Export failed",
+        description: err?.message || String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   const onRetry = async () => {
     if (!id) return;
     try {
@@ -1088,6 +1105,10 @@ export default function RunDetails() {
             <Button variant="outline" size="sm" onClick={onExportPdf}>
               <FileText className="h-4 w-4 mr-2" />
               PDF Report
+            </Button>
+            <Button variant="outline" size="sm" onClick={onExportZip}>
+              <Archive className="h-4 w-4 mr-2" />
+              Download All
             </Button>
             {(run.status === "failed" || run.status === "completed" || run.status === "aborted") && (
               <Button variant="outline" size="sm" onClick={onRetry}>
