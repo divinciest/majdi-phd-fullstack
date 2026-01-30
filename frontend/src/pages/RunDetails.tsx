@@ -555,6 +555,10 @@ export default function RunDetails() {
   const [extractedDataPageSize, setExtractedDataPageSize] = useState(100);
   const [extractedDataSort, setExtractedDataSort] = useState<string | undefined>(undefined);
 
+  const [validatedData, setValidatedData] = useState<RunExtractedDataResponse | null>(null);
+  const [validatedDataPage, setValidatedDataPage] = useState(1);
+  const [validatedDataPageSize, setValidatedDataPageSize] = useState(100);
+
   const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
   const [engineLogsLoading, setEngineLogsLoading] = useState(false);
@@ -633,6 +637,15 @@ export default function RunDetails() {
     }
   };
 
+  const fetchValidatedData = async () => {
+    if (!id) return;
+    try {
+      const data = await RunsAPI.getValidatedData(id, { page: validatedDataPage, pageSize: validatedDataPageSize });
+      setValidatedData(data);
+    } catch (err: any) {
+    }
+  };
+
   const fetchInspection = async () => {
     if (!id) return;
     try {
@@ -672,6 +685,7 @@ export default function RunDetails() {
       fetchEngineStatus(),
       fetchIpcMetadata(),
       fetchExtractedData(),
+      fetchValidatedData(),
       fetchSchemaMapping(),
       fetchProgress(),
     ]);
@@ -755,6 +769,10 @@ export default function RunDetails() {
   useEffect(() => {
     fetchExtractedData();
   }, [id, extractedDataPage, extractedDataPageSize, extractedDataSort]);
+
+  useEffect(() => {
+    fetchValidatedData();
+  }, [id, validatedDataPage, validatedDataPageSize]);
 
   useEffect(() => {
     fetchInspection();
@@ -1190,7 +1208,7 @@ export default function RunDetails() {
       {/* Tabs */}
       <div className="px-6 pb-6">
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-7 lg:grid-cols-7">
+          <TabsList className="grid w-full grid-cols-8 lg:grid-cols-8">
             <TabsTrigger value="overview">
               <Settings className="h-4 w-4 mr-2" />
               Overview
@@ -1214,6 +1232,10 @@ export default function RunDetails() {
             <TabsTrigger value="data">
               <Database className="h-4 w-4 mr-2" />
               Extracted Data
+            </TabsTrigger>
+            <TabsTrigger value="validated-data">
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Validated Data
             </TabsTrigger>
             <TabsTrigger value="validation">
               <CheckCircle className="h-4 w-4 mr-2" />
@@ -2102,6 +2124,109 @@ export default function RunDetails() {
                       <RefreshCw className="h-4 w-4 mr-2" />
                       Refresh Data
                     </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Validated Data Tab */}
+          <TabsContent value="validated-data" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>Validated Data (Accepted Rows)</span>
+                  {validatedData?.exists && validatedData.count > 0 && (
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {validatedData.count} accepted entries
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {!validatedData?.exists ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CheckCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>{validatedData?.message || "Validated data not available"}</p>
+                    <p className="text-xs mt-2">Validation must be enabled and completed to see filtered data</p>
+                  </div>
+                ) : validatedData.data.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <AlertCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No rows passed validation</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="rounded-md border overflow-x-auto">
+                      <div className="h-[500px] overflow-y-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-12 whitespace-nowrap">#</TableHead>
+                              <TableHead className="whitespace-nowrap min-w-[220px]">Source</TableHead>
+                              {resolvedSchemaFields.map((col) => (
+                                <TableHead key={col} className="whitespace-nowrap min-w-[200px]">
+                                  {col}
+                                </TableHead>
+                              ))}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {validatedData.data.map((entry: any, idx: number) => (
+                              <TableRow key={idx} className="align-top">
+                                <TableCell className="font-mono text-xs whitespace-nowrap">
+                                  {(validatedDataPage - 1) * validatedDataPageSize + idx + 1}
+                                </TableCell>
+                                <TableCell className="max-w-[220px] truncate text-xs whitespace-nowrap" title={entry.__source}>
+                                  {entry.__source || ""}
+                                </TableCell>
+                                {resolvedSchemaFields.map((col) => (
+                                  <TableCell key={col} className="max-w-[200px] truncate text-xs font-mono whitespace-nowrap">
+                                    {entry?.[col] ?? ""}
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-muted-foreground">
+                        Page {validatedDataPage} of {Math.max(1, Math.ceil((validatedData.count || 0) / validatedDataPageSize))} • {validatedData.count} total
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setValidatedDataPage(Math.max(1, validatedDataPage - 1))}
+                          disabled={validatedDataPage <= 1}
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setValidatedDataPage(validatedDataPage + 1)}
+                          disabled={validatedDataPage >= Math.ceil((validatedData.count || 0) / validatedDataPageSize)}
+                        >
+                          Next
+                        </Button>
+                        <select
+                          className="h-8 rounded border px-2 bg-background text-sm"
+                          value={validatedDataPageSize}
+                          onChange={(e) => {
+                            setValidatedDataPageSize(parseInt(e.target.value) || 100);
+                            setValidatedDataPage(1);
+                          }}
+                        >
+                          {[50, 100, 200, 500].map((s) => (
+                            <option key={s} value={s}>{s} rows</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
                   </div>
                 )}
               </CardContent>

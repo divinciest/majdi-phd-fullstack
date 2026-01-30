@@ -229,6 +229,15 @@ export const RunsAPI = {
   /** Get validation results for a run */
   getValidation: (id: string) => http<ValidationResult>(`/runs/${id}/validation`),
 
+  /** Get validated/filtered data for a run */
+  getValidatedData: (id: string, params?: { page?: number; pageSize?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.page) sp.set("page", String(params.page));
+    if (params?.pageSize) sp.set("pageSize", String(params.pageSize));
+    const qs = sp.toString();
+    return http<RunExtractedDataResponse>(`/runs/${id}/validated-data${qs ? `?${qs}` : ""}`);
+  },
+
   /** Create a new run with file uploads */
   create: async (payload: CreateRunPayload): Promise<Run> => {
     const form = new FormData();

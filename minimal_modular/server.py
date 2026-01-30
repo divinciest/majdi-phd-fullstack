@@ -3836,6 +3836,81 @@ def get_run_validation(run_id):
         return jsonify({"error": f"Failed to read validation results: {e}"}), 500
 
 
+@app.route("/runs/<run_id>/validated-data", methods=["GET"])
+def get_run_validated_data(run_id):
+    """Get validated/filtered data (validated_data.json) for a run.
+    
+    Returns only the rows that passed validation (accepted rows).
+    """
+    page = int(request.args.get("page", 1))
+    page_size = int(request.args.get("pageSize", 100))
+
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 1
+    if page_size > 500:
+        page_size = 500
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT output_dir, validation_enabled FROM runs WHERE id = ?", (run_id,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "Run not found"}), 404
+
+    output_dir = row["output_dir"]
+    if not output_dir:
+        return jsonify({"exists": False, "message": "Run has no output directory"})
+
+    if not row["validation_enabled"]:
+        return jsonify({"exists": False, "message": "Validation was not enabled for this run"})
+
+    validated_json_path = os.path.join(output_dir, "validated_data.json")
+
+    if not os.path.exists(validated_json_path):
+        return jsonify({
+            "exists": False,
+            "message": "Validated data not found. Run may still be in progress.",
+            "data": [],
+            "count": 0
+        })
+
+    try:
+        with open(validated_json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, list):
+            data = [data] if data else []
+
+        fields = set()
+        for item in data:
+            if isinstance(item, dict):
+                for k in item.keys():
+                    if k not in {"__source", "__url", "row_accept_candidate"}:
+                        fields.add(k)
+
+        total = len(data)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paged = data[start:end]
+
+        return jsonify({
+            "exists": True,
+            "data": paged,
+            "count": total,
+            "page": page,
+            "pageSize": page_size,
+            "fields": sorted(list(fields))
+        })
+    except json.JSONDecodeError as e:
+        return jsonify({"error": f"Invalid JSON in validated data: {e}"}), 500
+    except Exception as e:
+        return jsonify({"error": f"Failed to read validated data: {e}"}), 500
+
+
 @app.route("/runs/<run_id>/schema-mapping", methods=["GET"])
 def get_run_schema_mapping(run_id):
     """Get schema mapping (schema_mapping.json) for a run.
