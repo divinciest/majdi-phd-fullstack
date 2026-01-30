@@ -4189,8 +4189,8 @@ def export_run_zip(run_id):
     # Get related objects from DB
     # Sources
     cur.execute("""
-        SELECT id, filename, original_url, status, crawl_status, file_type, 
-               page_count, extracted_text_length, created_at
+        SELECT id, url, domain, title, source_type, status, error,
+               content_type, created_at, updated_at
         FROM sources WHERE run_id = ?
     """, (run_id,))
     sources = [dict(r) for r in cur.fetchall()]
@@ -4204,7 +4204,7 @@ def export_run_zip(run_id):
     
     # Meta sources
     cur.execute("""
-        SELECT id, method, query, result_count, created_at
+        SELECT id, method, name, query, config_json, created_at, updated_at
         FROM meta_sources WHERE run_id = ?
     """, (run_id,))
     meta_sources = [dict(r) for r in cur.fetchall()]
