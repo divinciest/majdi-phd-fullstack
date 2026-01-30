@@ -19,3 +19,6 @@ flask>=3.0.0
 flask-cors>=4.0.0
 werkzeug>=3.0.0
 sqlalchemy>=2.0.0
+
+# PDF report generation
+reportlab>=4.0.0

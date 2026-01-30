@@ -4049,7 +4049,7 @@ def download_run_data(run_id):
 
 @app.route("/runs/<run_id>/export", methods=["POST"])
 def export_run(run_id):
-    """Export run results."""
+    """Export run results as JSON."""
     now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"export_{run_id[:8]}_{now}.json"
     filepath = os.path.join(EXPORTS_FOLDER, filename)
@@ -4070,6 +4070,77 @@ def export_run(run_id):
     
     log_message(f"Run exported: {filename}", "INFO", run_id)
     return jsonify({"url": f"/exports/{cur.lastrowid}/download"})
+
+
+@app.route("/runs/<run_id>/export-pdf", methods=["POST"])
+def export_run_pdf(run_id):
+    """Export comprehensive PDF report for a run.
+    
+    Includes:
+    - Run metadata and configuration
+    - Extraction summary
+    - Validation results (if enabled)
+    - Extracted data tables
+    - Validated data tables (if enabled)
+    """
+    try:
+        from report_generator import generate_report_from_run_dir
+    except ImportError as e:
+        return jsonify({"error": f"Report generator not available: {e}. Install reportlab: pip install reportlab"}), 500
+    
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name, status, source_type, sources_count, data_entries_count,
+               llm_provider, start_date, created_at, output_dir, validation_enabled
+        FROM runs WHERE id = ?
+    """, (run_id,))
+    row = cur.fetchone()
+    conn.close()
+    
+    if not row:
+        return jsonify({"error": "Run not found"}), 404
+    
+    run_data = dict(row)
+    output_dir = run_data.get('output_dir')
+    
+    if not output_dir or not os.path.exists(output_dir):
+        return jsonify({"error": "Run output directory not found. Run may not have completed."}), 400
+    
+    # Generate PDF
+    now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = "".join(c for c in run_data.get('name', 'run')[:30] if c.isalnum() or c in (' ', '-', '_')).strip()
+    safe_name = safe_name.replace(' ', '_')
+    filename = f"report_{safe_name}_{run_id[:8]}_{now}.pdf"
+    filepath = os.path.join(EXPORTS_FOLDER, filename)
+    
+    try:
+        generate_report_from_run_dir(
+            run_id=run_id,
+            run_data=run_data,
+            output_dir=output_dir,
+            report_output_path=filepath
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate PDF report: {e}"}), 500
+    
+    # Record in DB
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO exports (run_id, created_at, file_path) VALUES (?, ?, ?)",
+        (run_id, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), filepath)
+    )
+    export_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    
+    log_message(f"PDF report generated: {filename}", "INFO", run_id)
+    return jsonify({
+        "url": f"/exports/{export_id}/download",
+        "filename": filename,
+        "exportId": export_id
+    })
 
 # ============================================================================
 # API Routes - Config (per-user configuration)

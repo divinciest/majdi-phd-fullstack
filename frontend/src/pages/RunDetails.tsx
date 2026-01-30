@@ -889,6 +889,22 @@ export default function RunDetails() {
     }
   };
 
+  const onExportPdf = async () => {
+    if (!id) return;
+    try {
+      toast({ title: "Generating PDF report...", description: "This may take a moment" });
+      const result = await RunsAPI.exportPdf(id);
+      toast({ title: "PDF Report ready", description: result.filename });
+      window.open(`http://localhost:23432${result.url}`, "_blank");
+    } catch (err: any) {
+      toast({
+        title: "PDF Export failed",
+        description: err?.message || String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   const onRetry = async () => {
     if (!id) return;
     try {
@@ -1068,6 +1084,10 @@ export default function RunDetails() {
             <Button variant="default" size="sm" onClick={onExport}>
               <Download className="h-4 w-4 mr-2" />
               Export
+            </Button>
+            <Button variant="outline" size="sm" onClick={onExportPdf}>
+              <FileText className="h-4 w-4 mr-2" />
+              PDF Report
             </Button>
             {(run.status === "failed" || run.status === "completed" || run.status === "aborted") && (
               <Button variant="outline" size="sm" onClick={onRetry}>

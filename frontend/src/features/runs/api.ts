@@ -350,4 +350,9 @@ export const RunsAPI = {
     
     return (await res.json()) as Run;
   },
+
+  /** Export run as PDF report */
+  exportPdf: (id: string) => http<{ url: string; filename: string; exportId: number }>(`/runs/${id}/export-pdf`, {
+    method: "POST",
+  }),
 };
