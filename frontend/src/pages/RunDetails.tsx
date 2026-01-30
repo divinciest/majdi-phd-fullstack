@@ -895,7 +895,7 @@ export default function RunDetails() {
       toast({ title: "Generating PDF report...", description: "This may take a moment" });
       const result = await RunsAPI.exportPdf(id);
       toast({ title: "PDF Report ready", description: result.filename });
-      window.open(`http://localhost:23432${result.url}`, "_blank");
+      window.open(`${API_BASE_URL}${result.url}`, "_blank");
     } catch (err: any) {
       toast({
         title: "PDF Export failed",

@@ -4092,7 +4092,7 @@ def export_run_pdf(run_id):
     cur = conn.cursor()
     cur.execute("""
         SELECT id, name, status, source_type, sources_count, data_entries_count,
-               llm_provider, start_date, created_at, output_dir, validation_enabled
+               llm_provider, start_date, output_dir, validation_enabled
         FROM runs WHERE id = ?
     """, (run_id,))
     row = cur.fetchone()
@@ -4122,6 +4122,8 @@ def export_run_pdf(run_id):
             report_output_path=filepath
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": f"Failed to generate PDF report: {e}"}), 500
     
     # Record in DB

@@ -5,23 +5,193 @@ Generates comprehensive PDF reports including:
 - Run metadata and configuration
 - Extracted data summary
 - Validation results and metrics
-- Data tables
+- Data tables with proper layout (no overflow/overlap)
 """
 
 import os
 import json
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4, landscape, letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch, cm
+from reportlab.lib.units import inch, cm, mm
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, Image, HRFlowable
+    PageBreak, HRFlowable, KeepTogether
 )
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+
+def _calculate_column_widths(
+    columns: List[str],
+    data: List[Dict[str, Any]],
+    available_width: float,
+    min_col_width: float = None,
+    max_col_width: float = None
+) -> List[float]:
+    """
+    Calculate optimal column widths based on content.
+    Ensures no overflow by fitting all columns within available width.
+    Guarantees minimum width of 15 points per column to prevent negative widths.
+    """
+    num_cols = len(columns)
+    if num_cols == 0:
+        return []
+    
+    # Ensure available_width is valid
+    if available_width is None or available_width <= 0:
+        available_width = 25 * cm  # Default A4 landscape width
+    
+    # Absolute minimum width per column (15 points ~ 5mm)
+    absolute_min = 15
+    
+    # If too many columns, just divide equally
+    if num_cols * absolute_min > available_width:
+        # Too many columns - use equal widths at minimum
+        equal_width = available_width / num_cols
+        return [max(absolute_min, equal_width) for _ in columns]
+    
+    # Set defaults based on column count
+    if min_col_width is None:
+        min_col_width = max(absolute_min, min(1.5 * cm, available_width / num_cols / 2))
+    if max_col_width is None:
+        max_col_width = min(6 * cm, available_width / 2)
+    
+    # Ensure min doesn't exceed available space per column
+    min_col_width = max(absolute_min, min(min_col_width, available_width / num_cols))
+    
+    # Calculate content-based widths (approximate)
+    col_max_lengths = []
+    for col in columns:
+        col_str = str(col) if col else ''
+        max_len = len(col_str)  # Header length
+        for row in data[:20]:  # Sample first 20 rows
+            val = row.get(col, '') if row else ''
+            val_str = str(val) if val is not None else ''
+            max_len = max(max_len, len(val_str[:50]))
+        col_max_lengths.append(max(1, max_len))  # Ensure at least 1
+    
+    # Convert character lengths to approximate widths (4 points per char at small font)
+    char_width = 4
+    raw_widths = []
+    for l in col_max_lengths:
+        w = l * char_width
+        w = max(min_col_width, min(w, max_col_width))
+        raw_widths.append(w)
+    
+    # Scale to fit available width exactly
+    total_raw = sum(raw_widths)
+    if total_raw > 0:
+        scale = available_width / total_raw
+        widths = [max(absolute_min, w * scale) for w in raw_widths]
+    else:
+        # Fallback to equal widths
+        widths = [available_width / num_cols] * num_cols
+    
+    # Ensure total equals available width
+    total = sum(widths)
+    if abs(total - available_width) > 0.1 and len(widths) > 0:
+        diff = available_width - total
+        widths[-1] = max(absolute_min, widths[-1] + diff)
+    
+    return widths
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    """Truncate text with ellipsis if too long."""
+    text = str(text) if text is not None else ''
+    if max_chars is None or max_chars <= 0:
+        max_chars = 50
+    if len(text) > max_chars:
+        return text[:max_chars-2] + '..'
+    return text
+
+
+def _create_data_table(
+    columns: List[str],
+    data: List[Dict[str, Any]],
+    available_width: float,
+    header_bg_color: str = '#16213e',
+    row_alt_color: str = '#f5f5f5',
+    font_size: int = 6,
+    max_rows: int = 100
+) -> Tuple[Table, int]:
+    """
+    Create a properly sized data table that fits within available width.
+    Uses Paragraph cells for text wrapping when needed.
+    Returns (table, rows_shown).
+    """
+    styles = getSampleStyleSheet()
+    cell_style = ParagraphStyle(
+        'CellStyle',
+        parent=styles['Normal'],
+        fontSize=font_size,
+        leading=font_size + 2,
+        wordWrap='CJK'  # Enable word wrapping
+    )
+    header_style = ParagraphStyle(
+        'HeaderStyle',
+        parent=styles['Normal'],
+        fontSize=font_size,
+        leading=font_size + 2,
+        textColor=colors.white,
+        fontName='Helvetica-Bold'
+    )
+    
+    # Ensure available_width is valid
+    if available_width is None or available_width <= 0:
+        available_width = 25 * cm
+    
+    # Calculate column widths
+    col_widths = _calculate_column_widths(columns, data, available_width)
+    
+    # Determine max chars per column based on width (with safety check)
+    max_chars_per_col = []
+    for w in col_widths:
+        if w is None or w <= 0:
+            max_chars_per_col.append(20)
+        else:
+            max_chars_per_col.append(max(5, int(w / 3)))  # ~3 points per char, min 5 chars
+    
+    # Build table data with Paragraphs for wrapping
+    table_data = []
+    
+    # Header row
+    header_row = [Paragraph(_truncate_text(col, 30), header_style) for col in columns]
+    table_data.append(header_row)
+    
+    # Data rows
+    rows_to_show = min(len(data), max_rows)
+    for entry in data[:rows_to_show]:
+        row = []
+        for i, col in enumerate(columns):
+            val = entry.get(col, '')
+            truncated = _truncate_text(val, max_chars_per_col[i])
+            row.append(Paragraph(truncated, cell_style))
+        table_data.append(row)
+    
+    # Create table
+    table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(header_bg_color)),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), font_size),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor(row_alt_color)]),
+    ]))
+    
+    return table, rows_to_show
 
 
 def generate_run_report(
@@ -34,26 +204,30 @@ def generate_run_report(
 ) -> str:
     """
     Generate a comprehensive PDF report for an extraction run.
-    
-    Args:
-        run_data: Run metadata from database
-        extracted_data: All extracted entries
-        validated_data: Filtered/accepted entries (if validation enabled)
-        validation_report: Validation results (if validation enabled)
-        output_path: Path to save the PDF
-        schema_fields: List of schema field names
-        
-    Returns:
-        Path to generated PDF
+    Uses landscape orientation for data tables to fit more columns.
+    Tables automatically split across pages without overlap.
     """
+    # Determine if we need landscape based on column count
+    num_columns = len(schema_fields) if schema_fields else 0
+    if num_columns == 0 and extracted_data:
+        sample = extracted_data[0]
+        num_columns = len([k for k in sample.keys() if k not in ('__source', '__url', 'row_accept_candidate')])
+    
+    # Use landscape for more than 5 columns
+    use_landscape = num_columns > 5
+    page_size = landscape(A4) if use_landscape else A4
+    
     doc = SimpleDocTemplate(
         output_path,
-        pagesize=A4,
+        pagesize=page_size,
         rightMargin=1*cm,
         leftMargin=1*cm,
         topMargin=1.5*cm,
         bottomMargin=1.5*cm
     )
+    
+    # Available width for tables
+    available_width = page_size[0] - 2*cm  # Page width minus margins
     
     styles = getSampleStyleSheet()
     
@@ -61,8 +235,8 @@ def generate_run_report(
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
-        fontSize=24,
-        spaceAfter=30,
+        fontSize=20 if use_landscape else 24,
+        spaceAfter=20,
         alignment=TA_CENTER,
         textColor=colors.HexColor('#1a1a2e')
     )
@@ -70,32 +244,32 @@ def generate_run_report(
     heading_style = ParagraphStyle(
         'CustomHeading',
         parent=styles['Heading2'],
-        fontSize=16,
-        spaceBefore=20,
-        spaceAfter=10,
+        fontSize=14,
+        spaceBefore=15,
+        spaceAfter=8,
         textColor=colors.HexColor('#16213e')
     )
     
     subheading_style = ParagraphStyle(
         'CustomSubheading',
         parent=styles['Heading3'],
-        fontSize=12,
-        spaceBefore=15,
-        spaceAfter=8,
+        fontSize=11,
+        spaceBefore=12,
+        spaceAfter=6,
         textColor=colors.HexColor('#0f3460')
     )
     
     normal_style = ParagraphStyle(
         'CustomNormal',
         parent=styles['Normal'],
-        fontSize=10,
-        spaceAfter=6
+        fontSize=9,
+        spaceAfter=4
     )
     
     small_style = ParagraphStyle(
         'CustomSmall',
         parent=styles['Normal'],
-        fontSize=8,
+        fontSize=7,
         textColor=colors.grey
     )
     
@@ -236,50 +410,43 @@ def generate_run_report(
     
     # Extracted Data Section
     section_num = 4 if validation_enabled else 3
-    elements.append(Paragraph(f"{section_num}. Extracted Data (First 50 Rows)", heading_style))
+    max_rows_to_show = 100
+    elements.append(Paragraph(f"{section_num}. Extracted Data", heading_style))
     
     if extracted_data and len(extracted_data) > 0:
-        # Determine columns to show
+        # Determine columns to show - use all schema fields
         if schema_fields:
-            columns = schema_fields[:8]  # Limit columns for readability
+            columns = list(schema_fields)  # Use all columns
         else:
             sample = extracted_data[0]
-            columns = [k for k in sample.keys() if k not in ('__source', '__url', 'row_accept_candidate')][:8]
+            columns = [k for k in sample.keys() if k not in ('__source', '__url', 'row_accept_candidate')]
         
-        # Add source column
+        # Prepare data with __source mapped to 'Source'
+        prepared_data = []
+        for entry in extracted_data:
+            row_data = {'Source': entry.get('__source', '')}
+            for col in columns:
+                row_data[col] = entry.get(col, '')
+            prepared_data.append(row_data)
+        
         display_columns = ['Source'] + columns
         
-        # Build table data
-        table_data = [display_columns]
-        for entry in extracted_data[:50]:  # Limit to 50 rows
-            row = [str(entry.get('__source', ''))[:25]]
-            for col in columns:
-                val = entry.get(col, '')
-                row.append(str(val)[:30] if val else '')
-            table_data.append(row)
-        
-        # Calculate column widths
-        col_width = 16*cm / len(display_columns)
-        col_widths = [col_width] * len(display_columns)
-        
-        data_table = Table(table_data, colWidths=col_widths)
-        data_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16213e')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 7),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
-        ]))
+        # Create table using helper function - it handles width calculation and splitting
+        data_table, rows_shown = _create_data_table(
+            columns=display_columns,
+            data=prepared_data,
+            available_width=available_width,
+            header_bg_color='#16213e',
+            row_alt_color='#f5f5f5',
+            font_size=6 if len(columns) > 8 else 7,
+            max_rows=max_rows_to_show
+        )
         elements.append(data_table)
         
-        if len(extracted_data) > 50:
-            elements.append(Spacer(1, 10))
+        if len(extracted_data) > rows_shown:
+            elements.append(Spacer(1, 8))
             elements.append(Paragraph(
-                f"... and {len(extracted_data) - 50} more rows (showing first 50)",
+                f"Showing {rows_shown} of {len(extracted_data)} total rows",
                 small_style
             ))
     else:
@@ -289,45 +456,39 @@ def generate_run_report(
     if validation_enabled and validated_data and len(validated_data) > 0:
         elements.append(PageBreak())
         section_num += 1
-        elements.append(Paragraph(f"{section_num}. Validated Data (First 50 Accepted Rows)", heading_style))
+        elements.append(Paragraph(f"{section_num}. Validated Data (Accepted Rows)", heading_style))
         
         if schema_fields:
-            columns = schema_fields[:8]
+            columns = list(schema_fields)
         else:
             sample = validated_data[0]
-            columns = [k for k in sample.keys() if k not in ('__source', '__url', 'row_accept_candidate')][:8]
+            columns = [k for k in sample.keys() if k not in ('__source', '__url', 'row_accept_candidate')]
+        
+        # Prepare data
+        prepared_data = []
+        for entry in validated_data:
+            row_data = {'Source': entry.get('__source', '')}
+            for col in columns:
+                row_data[col] = entry.get(col, '')
+            prepared_data.append(row_data)
         
         display_columns = ['Source'] + columns
         
-        table_data = [display_columns]
-        for entry in validated_data[:50]:
-            row = [str(entry.get('__source', ''))[:25]]
-            for col in columns:
-                val = entry.get(col, '')
-                row.append(str(val)[:30] if val else '')
-            table_data.append(row)
-        
-        col_width = 16*cm / len(display_columns)
-        col_widths = [col_width] * len(display_columns)
-        
-        val_data_table = Table(table_data, colWidths=col_widths)
-        val_data_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f3460')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 7),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#e8f4e8')]),
-        ]))
+        val_data_table, rows_shown = _create_data_table(
+            columns=display_columns,
+            data=prepared_data,
+            available_width=available_width,
+            header_bg_color='#0f3460',
+            row_alt_color='#e8f4e8',
+            font_size=6 if len(columns) > 8 else 7,
+            max_rows=max_rows_to_show
+        )
         elements.append(val_data_table)
         
-        if len(validated_data) > 50:
-            elements.append(Spacer(1, 10))
+        if len(validated_data) > rows_shown:
+            elements.append(Spacer(1, 8))
             elements.append(Paragraph(
-                f"... and {len(validated_data) - 50} more accepted rows (showing first 50)",
+                f"Showing {rows_shown} of {len(validated_data)} accepted rows",
                 small_style
             ))
     
