@@ -148,22 +148,6 @@ def main():
         "--enable-row-counting", action="store_true",
         help="Enable row counting pre-analysis phase to constrain extraction"
     )
-    parser.add_argument(
-        "--counter-models",
-        default="gemini,openai,anthropic",
-        help="Comma-separated list of models for row counting (default: gemini,openai,anthropic)"
-    )
-    parser.add_argument(
-        "--judge-model",
-        default="deepseek",
-        help="Model to judge between counter results (default: deepseek)"
-    )
-    parser.add_argument(
-        "--row-count-fallback",
-        default="max",
-        choices=["max", "median", "mode"],
-        help="Fallback strategy if judge fails (default: max)"
-    )
     args = parser.parse_args()
 
     print(f"[INFO] Retries configured: {args.retries}")
@@ -406,13 +390,10 @@ def main():
         if args.enable_row_counting:
             row_counting_config = RowCountingConfig(
                 enabled=True,
-                counter_models=[m.strip() for m in args.counter_models.split(",")],
-                judge_model=args.judge_model,
-                fallback_strategy=args.row_count_fallback,
-                parallel_counters=True
+                provider=ROWCOUNT_PROVIDER,
+                model=ROWCOUNT_MODEL,
+                max_candidates=5
             )
-            row_counting_config.rowcount_provider = ROWCOUNT_PROVIDER
-            row_counting_config.rowcount_model = ROWCOUNT_MODEL
             
             row_count_result = run_row_counting_phase(
                 pdf_text=content,
