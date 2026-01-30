@@ -290,35 +290,23 @@ def align_columns_with_fallback(
     
     if unmatched:
         if verbose:
-            print(f"\n⚠ WARNING: {unmatched_count}/{total_required} columns unmatched ({match_rate:.1%} match rate)")
+            print(f"Column alignment: {unmatched_count}/{total_required} unmatched ({match_rate:.1%} match rate)")
             for col in unmatched:
                 print(f"  - {col}")
         
         # Only abort if MORE than 50% of columns are unmatched
         if abort_on_failure and unmatched_count > total_required / 2:
             error_msg = (
-                f"\n{'='*80}\n"
-                f"🚨 CATASTROPHIC FAILURE: COLUMN ALIGNMENT FAILED\n"
-                f"{'='*80}\n"
-                f"PIPELINE ABORTED - {unmatched_count}/{total_required} columns ({100-match_rate*100:.1f}%) cannot be mapped.\n"
-                f"Threshold: >50% unmatched triggers abort.\n"
-                f"Unmatched columns: {unmatched}\n"
-                f"{'='*80}\n"
-                f"This is a HARD STOP. Too many columns missing.\n"
-                f"Either:\n"
-                f"  1. The PDF does not contain the required data fields\n"
-                f"  2. The schema expects columns that don't exist in extracted data\n"
-                f"  3. Column names are too different for fuzzy matching\n"
-                f"{'='*80}"
+                f"Column alignment failed: {unmatched_count}/{total_required} columns ({100-match_rate*100:.1f}%) unmapped. "
+                f"Threshold exceeded (>50%). Unmatched: {unmatched}"
             )
             raise ValueError(error_msg)
         elif unmatched:
             if verbose:
-                print(f"\n✓ Continuing with {matched_count}/{total_required} matched columns ({match_rate:.1%})")
-                print(f"  (Abort threshold: >50% unmatched)")
+                print(f"Proceeding with {matched_count}/{total_required} matched columns ({match_rate:.1%})")
     else:
         if verbose:
-            print(f"\n✓ All columns aligned ({matched_count}/{total_required})")
+            print(f"Column alignment complete: {matched_count}/{total_required} matched")
     
     return mapping
 

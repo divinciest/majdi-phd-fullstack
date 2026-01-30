@@ -132,7 +132,7 @@ def extract_with_retries(
             # Check for Rate Limit errors (429) and abort if found
             error_msg = str(e).lower()
             if "429" in error_msg or "rate limit" in error_msg or "too many requests" in error_msg:
-                print(f"\n      ‼️ CRITICAL: RATE LIMIT DETECTED. Aborting to prevent ambiguity.")
+                print(f"\n      Rate limit detected (429). Aborting retry sequence.")
                 raise e  # Re-raise to abort execution
                 
             print(f"      → ERROR calling LLM: {e}")
@@ -174,7 +174,7 @@ def extract_with_retries(
                 consecutive_failures += 1
                 user_prompt = (
                     initial_prompt
-                    + "\n\nCRITICAL: Your previous response produced 0 entries. "
+                    + "\n\nNote: Your previous response produced 0 entries. "
                     + "You MUST extract at least one complete row if any relevant data exists. "
                     + "Do not return empty arrays. Return ONLY valid JSON." 
                 )

@@ -3042,11 +3042,12 @@ def start_run(run_id):
         if validation_prompt_file_id:
             conn2 = get_db()
             cur2 = conn2.cursor()
-            cur2.execute("SELECT filename FROM files WHERE id = ?", (validation_prompt_file_id,))
+            cur2.execute("SELECT filename, run_id FROM files WHERE id = ?", (validation_prompt_file_id,))
             vp_row = cur2.fetchone()
             conn2.close()
             if vp_row:
-                validation_prompt_path = os.path.join(UPLOAD_FOLDER, vp_row["filename"])
+                file_run_id = vp_row["run_id"] or run_id
+                validation_prompt_path = os.path.join(UPLOAD_FOLDER, file_run_id, vp_row["filename"])
         
         # Spawn extraction process
         spawn_extraction_process(

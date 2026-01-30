@@ -112,7 +112,6 @@ export default function RunCreate() {
   // Prompt files (replaces textarea)
   const [extractionPromptFile, setExtractionPromptFile] = useState<File | null>(null);
   const [validationPromptFile, setValidationPromptFile] = useState<File | null>(null);
-  const [validationEnabled, setValidationEnabled] = useState(false);
   const [validationMaxRetries, setValidationMaxRetries] = useState(3);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   
@@ -146,7 +145,7 @@ export default function RunCreate() {
         llmProvider,
         extractionPrompt: extractionPromptFile || undefined,
         validationPrompt: validationPromptFile || undefined,
-        validationEnabled: validationEnabled && !!validationPromptFile,
+        validationEnabled: !!validationPromptFile,
         validationMaxRetries,
         enableRowCounting,
       });
@@ -195,7 +194,7 @@ export default function RunCreate() {
         llmProvider,
         extractionPrompt: extractionPromptFile || undefined,
         validationPrompt: validationPromptFile || undefined,
-        validationEnabled: validationEnabled && !!validationPromptFile,
+        validationEnabled: !!validationPromptFile,
         validationMaxRetries,
       });
 
@@ -230,7 +229,7 @@ export default function RunCreate() {
         llmProvider,
         extractionPrompt: extractionPromptFile || undefined,
         validationPrompt: validationPromptFile || undefined,
-        validationEnabled: validationEnabled && !!validationPromptFile,
+        validationEnabled: !!validationPromptFile,
         validationMaxRetries,
       });
 
@@ -353,36 +352,12 @@ export default function RunCreate() {
 
                       <PromptFileUpload
                         label="Validation Prompt"
-                        description="Requirements for validating extracted data (.txt file)"
+                        description="Upload a validation prompt to enable validation. Validation will automatically run when a prompt is provided."
                         value={validationPromptFile}
                         onChange={setValidationPromptFile}
                       />
 
                       {validationPromptFile && (
-                        <div className="flex items-center justify-between rounded-lg border p-4">
-                          <div className="space-y-0.5">
-                            <Label htmlFor="validationEnabled" className="text-base flex items-center gap-2">
-                              <CheckCircle2 className="h-4 w-4 text-green-500" />
-                              Enable Validation
-                            </Label>
-                            <p className="text-sm text-muted-foreground">
-                              Validate extracted data and retry on failures
-                            </p>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              id="validationEnabled"
-                              className="sr-only peer"
-                              checked={validationEnabled}
-                              onChange={(e) => setValidationEnabled(e.target.checked)}
-                            />
-                            <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                          </label>
-                        </div>
-                      )}
-
-                      {validationEnabled && validationPromptFile && (
                         <div className="space-y-2">
                           <Label htmlFor="maxRetries">Max Validation Retries</Label>
                           <select
@@ -543,36 +518,12 @@ export default function RunCreate() {
 
                       <PromptFileUpload
                         label="Validation Prompt"
-                        description="Requirements for validating extracted data (.txt file)"
+                        description="Upload a validation prompt to enable validation. Validation will automatically run when a prompt is provided."
                         value={validationPromptFile}
                         onChange={setValidationPromptFile}
                       />
 
                       {validationPromptFile && (
-                        <div className="flex items-center justify-between rounded-lg border p-4">
-                          <div className="space-y-0.5">
-                            <Label htmlFor="validationEnabledSearch" className="text-base flex items-center gap-2">
-                              <CheckCircle2 className="h-4 w-4 text-green-500" />
-                              Enable Validation
-                            </Label>
-                            <p className="text-sm text-muted-foreground">
-                              Validate extracted data and retry on failures
-                            </p>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              id="validationEnabledSearch"
-                              className="sr-only peer"
-                              checked={validationEnabled}
-                              onChange={(e) => setValidationEnabled(e.target.checked)}
-                            />
-                            <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                          </label>
-                        </div>
-                      )}
-
-                      {validationEnabled && validationPromptFile && (
                         <div className="space-y-2">
                           <Label htmlFor="maxRetriesSearch">Max Validation Retries</Label>
                           <select
@@ -704,36 +655,12 @@ export default function RunCreate() {
 
                       <PromptFileUpload
                         label="Validation Prompt"
-                        description="Requirements for validating extracted data (.txt file)"
+                        description="Upload a validation prompt to enable validation. Validation will automatically run when a prompt is provided."
                         value={validationPromptFile}
                         onChange={setValidationPromptFile}
                       />
 
                       {validationPromptFile && (
-                        <div className="flex items-center justify-between rounded-lg border p-4">
-                          <div className="space-y-0.5">
-                            <Label htmlFor="validationEnabledLinks" className="text-base flex items-center gap-2">
-                              <CheckCircle2 className="h-4 w-4 text-green-500" />
-                              Enable Validation
-                            </Label>
-                            <p className="text-sm text-muted-foreground">
-                              Validate extracted data and retry on failures
-                            </p>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              id="validationEnabledLinks"
-                              className="sr-only peer"
-                              checked={validationEnabled}
-                              onChange={(e) => setValidationEnabled(e.target.checked)}
-                            />
-                            <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                          </label>
-                        </div>
-                      )}
-
-                      {validationEnabled && validationPromptFile && (
                         <div className="space-y-2">
                           <Label htmlFor="maxRetriesLinks">Max Validation Retries</Label>
                           <select

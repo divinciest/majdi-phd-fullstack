@@ -393,7 +393,7 @@ def main():
             content = convert_pdf_to_text(filepath, use_cache=use_cache)
             print(f"      → Got {len(content):,} characters")
         except Exception as e:
-            print(f"      ‼️ CRITICAL: PDF to text conversion failed: {e}")
+            print(f"      PDF to text conversion failed: {e}")
             update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries))
             sys.exit(1)
 
@@ -472,7 +472,7 @@ def main():
                             if last_count is not None:
                                 attempt_prompt = (
                                     attempt_prompt
-                                    + "\n\nCRITICAL: Your previous response had "
+                                    + "\n\nNote: Your previous response had "
                                     + str(last_count)
                                     + " rows, but you MUST return EXACTLY "
                                     + str(chunk_row_count)
@@ -508,7 +508,7 @@ def main():
 
                         if attempt == CONSTRAINED_ROWCOUNT_RETRIES:
                             print(
-                                f"      ‼️ CRITICAL: Batch {chunk_idx} row count mismatch after retries: "
+                                f"      Batch {chunk_idx} row count mismatch after retries: "
                                 f"expected {chunk_row_count}, got {last_count}"
                             )
                             update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
@@ -516,7 +516,7 @@ def main():
 
                 if len(entries) != total_rows:
                     print(
-                        f"      ‼️ CRITICAL: Chunked constrained extraction total mismatch: "
+                        f"      Chunked extraction total mismatch: "
                         f"expected {total_rows}, got {len(entries)}"
                     )
                     update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
@@ -563,13 +563,13 @@ def main():
                             break
                         if attempt == CONSTRAINED_ROWCOUNT_RETRIES:
                             print(
-                                f"      ‼️ CRITICAL: Constrained extraction row count mismatch after retries: "
+                                f"      Row count mismatch after retries: "
                                 f"expected {total_rows}, got {len(entries)}"
                             )
                             update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
                             sys.exit(1)
                 except Exception as e:
-                    print(f"      ‼️ CRITICAL: Extraction aborted due to error: {e}")
+                    print(f"      Extraction aborted: {e}")
                     update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
                     sys.exit(1)
         else:
@@ -591,7 +591,7 @@ def main():
                     pdf_text=content
                 )
             except Exception as e:
-                print(f"      ‼️ CRITICAL: Extraction aborted due to error: {e}")
+                print(f"      Extraction aborted: {e}")
                 update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
                 sys.exit(1)
         

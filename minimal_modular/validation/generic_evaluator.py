@@ -6,7 +6,12 @@ Used when rules contain python_expression field instead of function names.
 """
 import pandas as pd
 import numpy as np
+import warnings
 from typing import Any, Dict
+
+# Suppress SyntaxWarning for invalid escape sequences in LLM-generated expressions
+# These come from regex patterns like \( that LLMs generate
+warnings.filterwarnings('ignore', category=SyntaxWarning, module='<string>')
 
 
 # Safe namespace for expression evaluation
@@ -33,6 +38,46 @@ SAFE_NAMESPACE = {
 }
 
 
+
+
+def _fix_operator_precedence(expression: str) -> str:
+    """
+    Fix common operator precedence issues in LLM-generated expressions.
+    
+    The & and | operators bind tighter than comparison operators in Python,
+    so expressions like: df['a'] != '' & df['b'] != 'N.A.'
+    need to become: (df['a'] != '') & (df['b'] != 'N.A.')
+    """
+    import re
+    
+    # Pattern to find comparisons not wrapped in parentheses before & or |
+    # This handles: expr != value & expr2 != value2
+    # by wrapping each comparison in parentheses
+    
+    # Split on & and | while keeping the operators
+    parts = re.split(r'(\s*[&|]\s*)', expression)
+    
+    if len(parts) <= 1:
+        return expression
+    
+    fixed_parts = []
+    for part in parts:
+        part = part.strip()
+        if part in ['&', '|']:
+            fixed_parts.append(f' {part} ')
+        elif part:
+            # Check if this part contains a comparison and is not already wrapped
+            has_comparison = any(op in part for op in ['!=', '==', '<=', '>=', '<', '>', '.notna()', '.isna()', '.isnull()', '.notnull()'])
+            already_wrapped = part.startswith('(') and part.endswith(')')
+            
+            if has_comparison and not already_wrapped:
+                fixed_parts.append(f'({part})')
+            else:
+                fixed_parts.append(part)
+    
+    return ''.join(fixed_parts)
+
+
 def evaluate_expression(df: pd.DataFrame, expression: str, columns: list = None) -> pd.Series:
     """
     Safely evaluate a Python expression against a DataFrame.
@@ -51,12 +96,20 @@ def evaluate_expression(df: pd.DataFrame, expression: str, columns: list = None)
         - "df['A'] + df['B'] == df['Total']"
         - "abs(df['Calculated'] - df['Reported']) < 0.05"
     """
+    import warnings
     try:
+        # Fix operator precedence issues in LLM-generated expressions
+        expression = _fix_operator_precedence(expression)
+        
         # Create namespace with df included
+        # Include SAFE_NAMESPACE in globals so lambdas can access str, int, etc.
         namespace = {**SAFE_NAMESPACE, 'df': df}
         
-        # Evaluate the expression
-        result = eval(expression, {"__builtins__": {}}, namespace)
+        # Evaluate the expression - suppress SyntaxWarning for invalid escape sequences
+        # LLM-generated expressions often contain regex patterns with \( etc.
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=SyntaxWarning)
+            result = eval(expression, namespace, namespace)
         
         # Ensure result is a boolean Series
         if isinstance(result, pd.Series):

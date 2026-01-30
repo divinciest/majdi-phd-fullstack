@@ -5,9 +5,13 @@ Generic engine for executing validation rules on dataframes.
 """
 import pandas as pd
 import numpy as np
+import warnings
 from typing import Any, Dict, List, Optional, Callable
 import importlib
 import re
+
+# Suppress SyntaxWarning for invalid escape sequences in LLM-generated expressions
+warnings.filterwarnings('ignore', category=SyntaxWarning, module='<string>')
 
 from .rule_types import (
     ValidationResult, RuleDefinition, ValidationConfig, ValidationReport,
@@ -81,7 +85,7 @@ class RuleEngine:
                 required_columns=list(required_columns),
                 available_columns=list(df.columns),
                 use_llm=True,  # Enable LLM fallback
-                abort_on_failure=True,  # CATASTROPHIC FAILURE on unmatched columns
+                abort_on_failure=True,
                 verbose=True
             )
             
@@ -108,9 +112,8 @@ class RuleEngine:
                             )
             
         except ValueError as e:
-            # Column alignment failure is CATASTROPHIC - re-raise to abort pipeline
-            print(f"\n✗ Column alignment failed: {e}")
-            raise  # RE-RAISE to abort entire pipeline - no proceeding allowed
+            print(f"Column alignment failed: {e}")
+            raise
         
         print("=" * 80)
         print()
@@ -373,15 +376,23 @@ class RuleEngine:
         context.update({
             'pd': pd,
             'np': np,
+            'df': df,
             'abs': abs,
             'len': len,
             'sum': sum,
             'min': min,
-            'max': max
+            'max': max,
+            'str': str,
+            'int': int,
+            'float': float,
+            'bool': bool,
         })
         
+        import warnings
         try:
-            result = eval(condition, {"__builtins__": {}}, context)
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=SyntaxWarning)
+                result = eval(condition, {"__builtins__": {}}, context)
             if isinstance(result, pd.Series):
                 return result
             elif isinstance(result, bool):
@@ -397,17 +408,25 @@ class RuleEngine:
         context.update({
             'pd': pd,
             'np': np,
+            'df': group,
             'group': group,
             'len': len,
             'sum': sum,
             'min': min,
             'max': max,
             'mean': np.mean,
-            'median': np.median
+            'median': np.median,
+            'str': str,
+            'int': int,
+            'float': float,
+            'bool': bool,
         })
         
+        import warnings
         try:
-            result = eval(expression, {"__builtins__": {}}, context)
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=SyntaxWarning)
+                result = eval(expression, {"__builtins__": {}}, context)
             return bool(result)
         except Exception as e:
             raise ValueError(f"Failed to evaluate aggregation '{expression}': {str(e)}")
