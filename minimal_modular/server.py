@@ -4280,6 +4280,30 @@ def export_run_zip(run_id):
         else:
             ws_exports.append(["No exports found"])
         
+        # Sheet 6: Validated Data
+        ws_validated = wb.create_sheet("Validated Data")
+        validated_json_path = os.path.join(output_dir, "validated_data.json")
+        if os.path.exists(validated_json_path):
+            try:
+                with open(validated_json_path, "r", encoding="utf-8") as f:
+                    validated_data = json.load(f)
+                if isinstance(validated_data, list) and validated_data:
+                    all_keys = set()
+                    for row in validated_data:
+                        if isinstance(row, dict):
+                            all_keys.update(row.keys())
+                    headers = sorted(list(all_keys))
+                    ws_validated.append(headers)
+                    for row in validated_data:
+                        if isinstance(row, dict):
+                            ws_validated.append([str(row.get(h, '')) for h in headers])
+                else:
+                    ws_validated.append(["No validated data rows found"])
+            except Exception as e:
+                ws_validated.append([f"Error reading validated data: {e}"])
+        else:
+            ws_validated.append(["Validated data not available (validation may not be enabled or complete)"])
+        
         # Save Excel to ZIP
         excel_buffer = io.BytesIO()
         wb.save(excel_buffer)
