@@ -1,13 +1,10 @@
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { deepResearchApi, crawlJobsApi, DeepResearchRun, CrawlJob, ExtractedLink } from './api';
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { deepResearchApi, DeepResearchRun, ExtractedLink } from './api';
 
 interface DeepResearchState {
   runs: DeepResearchRun[];
   currentRun: DeepResearchRun | null;
   extractedLinks: ExtractedLink[];
-  crawlJobs: CrawlJob[];
-  report: string;
-  logs: string;
   loading: boolean;
   error: string | null;
   page: number;
@@ -18,9 +15,6 @@ const initialState: DeepResearchState = {
   runs: [],
   currentRun: null,
   extractedLinks: [],
-  crawlJobs: [],
-  report: '',
-  logs: '',
   loading: false,
   error: null,
   page: 1,
@@ -67,46 +61,6 @@ export const fetchExtractedLinks = createAsyncThunk(
   }
 );
 
-export const fetchReport = createAsyncThunk(
-  'deepResearch/fetchReport',
-  async (id: string) => {
-    const response = await deepResearchApi.getReport(id);
-    return response.report || '';
-  }
-);
-
-export const fetchLogs = createAsyncThunk(
-  'deepResearch/fetchLogs',
-  async (id: string) => {
-    const response = await deepResearchApi.getLogs(id);
-    return response.logs || '';
-  }
-);
-
-export const fetchCrawlJobs = createAsyncThunk(
-  'deepResearch/fetchCrawlJobs',
-  async (deepResearchId?: string) => {
-    const jobs = await crawlJobsApi.list(deepResearchId);
-    return jobs;
-  }
-);
-
-export const resetCrawlJob = createAsyncThunk(
-  'deepResearch/resetCrawlJob',
-  async (jobId: string) => {
-    await crawlJobsApi.reset(jobId);
-    return jobId;
-  }
-);
-
-export const resetAllCrawlJobs = createAsyncThunk(
-  'deepResearch/resetAllCrawlJobs',
-  async (deepResearchId: string) => {
-    const result = await crawlJobsApi.resetAll(deepResearchId);
-    return { deepResearchId, resetCount: result.resetCount };
-  }
-);
-
 const deepResearchSlice = createSlice({
   name: 'deepResearch',
   initialState,
@@ -114,9 +68,6 @@ const deepResearchSlice = createSlice({
     clearCurrentRun: (state) => {
       state.currentRun = null;
       state.extractedLinks = [];
-      state.crawlJobs = [];
-      state.report = '';
-      state.logs = '';
     },
     clearError: (state) => {
       state.error = null;
@@ -165,30 +116,6 @@ const deepResearchSlice = createSlice({
       })
       .addCase(fetchExtractedLinks.fulfilled, (state, action) => {
         state.extractedLinks = action.payload;
-      })
-      .addCase(fetchReport.fulfilled, (state, action) => {
-        state.report = action.payload;
-      })
-      .addCase(fetchLogs.fulfilled, (state, action) => {
-        state.logs = action.payload;
-      })
-      .addCase(fetchCrawlJobs.fulfilled, (state, action) => {
-        state.crawlJobs = action.payload;
-      })
-      .addCase(resetCrawlJob.fulfilled, (state, action) => {
-        const job = state.crawlJobs.find((j) => j.id === action.payload);
-        if (job) {
-          job.status = 'PENDING';
-          job.error = undefined;
-        }
-      })
-      .addCase(resetAllCrawlJobs.fulfilled, (state) => {
-        state.crawlJobs.forEach((job) => {
-          if (job.status === 'CLAIMED' || job.status === 'FAILED') {
-            job.status = 'PENDING';
-            job.error = undefined;
-          }
-        });
       });
   },
 });

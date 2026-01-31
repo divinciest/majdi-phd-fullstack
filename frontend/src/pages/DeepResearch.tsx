@@ -26,11 +26,9 @@ import {
   Eye,
   Trash2,
   Link,
-  FileText,
   RefreshCw,
   Loader2,
-  ExternalLink,
-  Globe
+  ExternalLink
 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useAppDispatch, useAppSelector } from "@/hooks/store"
@@ -40,17 +38,14 @@ import {
   deleteDeepResearchRun,
   fetchDeepResearchRun,
   fetchExtractedLinks,
-  fetchCrawlJobs,
-  fetchReport,
   clearCurrentRun,
-  resetAllCrawlJobs,
 } from "@/features/deepResearch/deepResearchSlice"
 import { toast } from "@/hooks/use-toast"
 import { Label } from "@/components/ui/label"
 
 export default function DeepResearch() {
   const dispatch = useAppDispatch()
-  const { runs, currentRun, extractedLinks, crawlJobs, report, loading, error } = useAppSelector((s) => s.deepResearch)
+  const { runs, currentRun, extractedLinks, loading, error } = useAppSelector((s) => s.deepResearch)
   
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
@@ -94,12 +89,7 @@ export default function DeepResearch() {
   const handleViewDetails = async (id: string) => {
     await dispatch(fetchDeepResearchRun(id))
     await dispatch(fetchExtractedLinks(id))
-    await dispatch(fetchCrawlJobs(id))
     setDetailDialogOpen(true)
-  }
-
-  const handleViewReport = async (id: string) => {
-    await dispatch(fetchReport(id))
   }
 
   const getStatusBadge = (status: string) => {
@@ -113,26 +103,13 @@ export default function DeepResearch() {
     return <Badge variant={variants[status] || "secondary"}>{status}</Badge>
   }
 
-  const getCrawlStatusBadge = (status: string) => {
-    const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-      PENDING: "secondary",
-      CLAIMED: "default",
-      DONE: "outline",
-      FAILED: "destructive",
-    }
-    return <Badge variant={variants[status] || "secondary"}>{status}</Badge>
-  }
-
-  const pendingJobs = crawlJobs.filter(j => j.status === 'PENDING').length
-  const doneJobs = crawlJobs.filter(j => j.status === 'DONE').length
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Deep Research</h1>
           <p className="text-muted-foreground">
-            AI-powered research with automatic link extraction and crawling
+            Extract links for manual research work
           </p>
         </div>
         <div className="flex gap-2">
@@ -281,117 +258,35 @@ export default function DeepResearch() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Link className="h-4 w-4" />
-                      Extracted Links ({extractedLinks.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="max-h-[200px] overflow-y-auto">
-                    {extractedLinks.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No links extracted yet</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {extractedLinks.slice(0, 10).map((link, i) => (
-                          <li key={i} className="text-sm">
-                            <a
-                              href={link.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-500 hover:underline flex items-center gap-1"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                              {link.title || link.url}
-                            </a>
-                          </li>
-                        ))}
-                        {extractedLinks.length > 10 && (
-                          <li className="text-sm text-muted-foreground">
-                            ... and {extractedLinks.length - 10} more
-                          </li>
-                        )}
-                      </ul>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center justify-between">
-                      <span className="flex items-center gap-2">
-                        <Globe className="h-4 w-4" />
-                        Crawl Jobs ({doneJobs}/{crawlJobs.length})
-                      </span>
-                      {crawlJobs.some(j => j.status === 'CLAIMED' || j.status === 'FAILED') && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-xs"
-                          onClick={async () => {
-                            await dispatch(resetAllCrawlJobs(currentRun!.id))
-                            toast({ title: "Jobs Reset", description: "All stuck jobs reset to PENDING" })
-                            dispatch(fetchCrawlJobs(currentRun!.id))
-                          }}
-                        >
-                          <RefreshCw className="h-3 w-3 mr-1" />
-                          Reset Stuck
-                        </Button>
-                      )}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="max-h-[400px] overflow-y-auto">
-                    {crawlJobs.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No crawl jobs created yet</p>
-                    ) : (
-                      <ul className="space-y-1">
-                        {crawlJobs.map((job) => (
-                          <li key={job.id} className="text-xs flex items-center justify-between gap-2 py-1 border-b border-border/50">
-                            <a 
-                              href={job.url} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="truncate flex-1 text-blue-500 hover:underline"
-                              title={job.url}
-                            >
-                              {job.title || job.url}
-                            </a>
-                            <div className="flex items-center gap-1 shrink-0">
-                              {getCrawlStatusBadge(job.status)}
-                              {job.error && (
-                                <span className="text-red-500 text-xs" title={job.error}>⚠</span>
-                              )}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
-              {currentRun.status === 'completed' && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      Research Report
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {report ? (
-                      <div className="prose prose-sm max-h-[300px] overflow-y-auto">
-                        <pre className="whitespace-pre-wrap text-sm">{report}</pre>
-                      </div>
-                    ) : (
-                      <Button variant="outline" size="sm" onClick={() => handleViewReport(currentRun.id)}>
-                        Load Report
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Link className="h-4 w-4" />
+                    Extracted Links ({extractedLinks.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="max-h-[400px] overflow-y-auto">
+                  {extractedLinks.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No links extracted yet</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {extractedLinks.map((link, i) => (
+                        <li key={i} className="text-sm">
+                          <a
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-500 hover:underline flex items-center gap-1"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            {link.title || link.url}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
             </div>
           )}
         </DialogContent>
