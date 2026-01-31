@@ -80,6 +80,14 @@ from .objective_assessment import (
     DataIssue
 )
 
+from .cell_scoring import (
+    compute_cell_scores,
+    save_scoring_report,
+    load_scoring_report,
+    ScoringReport,
+    CellScore
+)
+
 __all__ = [
     # Types
     'RuleSeverity',
@@ -129,5 +137,12 @@ __all__ = [
     'generate_objective_assessment',
     'save_objective_assessment',
     'ObjectiveAssessmentReport',
-    'DataIssue'
+    'DataIssue',
+    
+    # Cell Scoring
+    'compute_cell_scores',
+    'save_scoring_report',
+    'load_scoring_report',
+    'ScoringReport',
+    'CellScore'
 ]

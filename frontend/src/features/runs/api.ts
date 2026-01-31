@@ -198,6 +198,27 @@ export type AIIssue = {
   affected_rows?: number | null;
 };
 
+export type CellScore = {
+  row: number;
+  column: string;
+  value: string | null;
+  score: number;
+  penalties: string[];
+  found_in_source: boolean | null;
+  is_null: boolean;
+};
+
+export type ValidationScoresResponse = {
+  exists: boolean;
+  message?: string;
+  table_score?: number;
+  total_cells?: number;
+  scored_cells?: number;
+  row_scores?: Record<string, number>;
+  column_scores?: Record<string, number>;
+  cell_scores?: CellScore[];
+};
+
 export type EnhancedValidationReport = {
   exists: boolean;
   message?: string;
@@ -580,6 +601,10 @@ export const RunsAPI = {
 
   /** Get API call analytics for a run */
   getApiAnalytics: (id: string) => http<ApiAnalyticsResponse>(`/runs/${id}/api-analytics`),
+
+  /** Get cell scoring report for a run */
+  getValidationScores: (id: string, includeCells: boolean = false) => 
+    http<ValidationScoresResponse>(`/runs/${id}/validation/scores?include_cells=${includeCells}`),
 
   /** Clear all validation results for a run */
   clearValidation: async (id: string): Promise<{ success: boolean; message: string }> => {

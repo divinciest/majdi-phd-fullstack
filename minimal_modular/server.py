@@ -4544,23 +4544,53 @@ def get_run_validation(run_id):
                 except Exception:
                     pass
 
-        # Read enhanced_report.json for accepted/rejected (preferred source of truth)
-        accepted_rows = row["validation_accepted_count"]
-        rejected_rows = row["validation_rejected_count"]
+        # Read accepted/rejected from multiple sources (in order of preference)
+        accepted_rows = None
+        rejected_rows = None
         total_rows = report.get("total_rows", 0)
         
+        # 1. Try enhanced_report.json first (most accurate)
         enhanced_report_path = os.path.join(output_dir, "validation", "enhanced_report.json")
         if os.path.exists(enhanced_report_path):
             try:
                 with open(enhanced_report_path, "r", encoding="utf-8") as f:
                     enhanced = json.load(f)
-                # Always prefer enhanced_report values as they're more accurate
-                accepted_rows = enhanced.get("accepted_rows", enhanced.get("total_rows", 0))
+                accepted_rows = enhanced.get("accepted_rows")
                 rejected_rows = enhanced.get("rejected_rows", 0)
                 if total_rows == 0:
                     total_rows = enhanced.get("total_rows", 0)
             except:
                 pass
+        
+        # 2. Try counting from validated_data.json
+        if accepted_rows is None:
+            validated_data_path = os.path.join(output_dir, "validated_data.json")
+            if os.path.exists(validated_data_path):
+                try:
+                    with open(validated_data_path, "r", encoding="utf-8") as f:
+                        validated_data = json.load(f)
+                    if isinstance(validated_data, list):
+                        accepted_rows = len(validated_data)
+                except:
+                    pass
+        
+        # 3. Try counting from global_data.json for total
+        if total_rows == 0:
+            global_data_path = os.path.join(output_dir, "global_data.json")
+            if os.path.exists(global_data_path):
+                try:
+                    with open(global_data_path, "r", encoding="utf-8") as f:
+                        global_data = json.load(f)
+                    if isinstance(global_data, list):
+                        total_rows = len(global_data)
+                except:
+                    pass
+        
+        # 4. Fall back to database values only if still None
+        if accepted_rows is None:
+            accepted_rows = row["validation_accepted_count"] or total_rows
+        if rejected_rows is None:
+            rejected_rows = row["validation_rejected_count"] or 0
         
         return jsonify({
             "exists": True,
@@ -5347,6 +5377,59 @@ def get_enhanced_validation_report(run_id):
         return jsonify({"error": f"Failed to read enhanced validation report: {e}"}), 500
 
 
+@app.route("/runs/<run_id>/validation/scores", methods=["GET"])
+def get_validation_scores(run_id):
+    """Get cell scoring report for a run.
+    
+    Returns cell, row, column, and table scores.
+    Query params:
+        - include_cells: bool (default false) - include per-cell scores (can be large)
+    """
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT output_dir FROM runs WHERE id = ?", (run_id,))
+    row = cur.fetchone()
+    conn.close()
+    
+    if not row:
+        return jsonify({"error": "Run not found"}), 404
+    
+    output_dir = row["output_dir"]
+    if not output_dir:
+        return jsonify({"error": "Run has no output directory"}), 400
+    
+    scores_path = os.path.join(output_dir, "validation", "cell_scores.json")
+    
+    if not os.path.isfile(scores_path):
+        return jsonify({
+            "exists": False,
+            "message": "Cell scores not found. Run validation first."
+        })
+    
+    try:
+        with open(scores_path, "r", encoding="utf-8") as f:
+            scores = json.load(f)
+        
+        include_cells = request.args.get("include_cells", "false").lower() == "true"
+        
+        response = {
+            "exists": True,
+            "table_score": scores.get("table_score", 0),
+            "total_cells": scores.get("total_cells", 0),
+            "scored_cells": scores.get("scored_cells", 0),
+            "row_scores": scores.get("row_scores", {}),
+            "column_scores": scores.get("column_scores", {})
+        }
+        
+        if include_cells:
+            response["cell_scores"] = scores.get("cell_scores", [])
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to read cell scores: {e}"}), 500
+
+
 @app.route("/runs/<run_id>/validated-data", methods=["GET"])
 def get_run_validated_data(run_id):
     """Get validated/filtered data (validated_data.json) for a run.
@@ -5891,9 +5974,26 @@ def export_run_zip(run_id):
         else:
             ws_extracted.append(["Extracted data not available"])
         
-        # Sheet 9: Validated Data
+        # Sheet 9: Validated Data with Scores
         ws_validated = wb.create_sheet("Validated Data")
         validated_json_path = os.path.join(output_dir, "validated_data.json")
+        cell_scores_path = os.path.join(output_dir, "validation", "cell_scores.json")
+        
+        # Load cell scores if available
+        cell_scores_data = None
+        row_scores = {}
+        column_scores = {}
+        table_score = None
+        if os.path.exists(cell_scores_path):
+            try:
+                with open(cell_scores_path, "r", encoding="utf-8") as f:
+                    cell_scores_data = json.load(f)
+                row_scores = {int(k): v for k, v in cell_scores_data.get("row_scores", {}).items()}
+                column_scores = cell_scores_data.get("column_scores", {})
+                table_score = cell_scores_data.get("table_score")
+            except:
+                pass
+        
         if os.path.exists(validated_json_path):
             try:
                 with open(validated_json_path, "r", encoding="utf-8") as f:
@@ -5903,11 +6003,24 @@ def export_run_zip(run_id):
                     for row in validated_data:
                         if isinstance(row, dict):
                             all_keys.update(row.keys())
-                    headers = sorted(list(all_keys))
-                    ws_validated.append(headers)
-                    for row in validated_data:
+                    headers = sorted([k for k in all_keys if not k.startswith("_")])
+                    
+                    # Add row score column and table score header
+                    header_row = ["Row #", "_row_score"] + headers
+                    if table_score is not None:
+                        ws_validated.append([f"Table Score: {table_score:.1f}/100"])
+                        ws_validated.append([])
+                    
+                    # Add column scores row
+                    col_score_row = ["", "Column Scores:"] + [f"{column_scores.get(h, '')}" for h in headers]
+                    ws_validated.append(col_score_row)
+                    ws_validated.append(header_row)
+                    
+                    for idx, row in enumerate(validated_data):
                         if isinstance(row, dict):
-                            ws_validated.append([str(row.get(h, '')) for h in headers])
+                            row_score = row_scores.get(idx, "")
+                            data_row = [idx + 1, row_score] + [str(row.get(h, '')) for h in headers]
+                            ws_validated.append(data_row)
                 else:
                     ws_validated.append(["No validated data rows found"])
             except Exception as e:

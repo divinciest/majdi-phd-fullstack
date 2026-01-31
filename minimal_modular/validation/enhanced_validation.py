@@ -49,6 +49,11 @@ from .objective_assessment import (
     save_objective_assessment,
     ObjectiveAssessmentReport
 )
+from .cell_scoring import (
+    compute_cell_scores,
+    save_scoring_report,
+    ScoringReport
+)
 
 
 @dataclass
@@ -81,6 +86,9 @@ class EnhancedValidationReport:
     # Objective assessment
     objective_grade: str = "?"
     objective_narrative: str = ""
+    
+    # Cell scoring
+    table_score: float = 0.0
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -268,7 +276,7 @@ def run_enhanced_validation(
     )
     
     if verbose:
-        print(f"\n[6/6] OBJECTIVE DATA ASSESSMENT")
+        print(f"\n[6/7] OBJECTIVE DATA ASSESSMENT")
     
     objective_report = generate_objective_assessment(
         extracted_data=extracted_data,
@@ -280,6 +288,22 @@ def run_enhanced_validation(
     save_objective_assessment(
         objective_report,
         os.path.join(validation_dir, "objective_assessment.json")
+    )
+    
+    if verbose:
+        print(f"\n[7/7] CELL SCORING")
+    
+    scoring_report = compute_cell_scores(
+        extracted_data=extracted_data,
+        grounding_report=grounding_report,
+        validation_report=validation_report,
+        error_report=error_report,
+        schema_fields=schema_fields,
+        verbose=verbose
+    )
+    save_scoring_report(
+        scoring_report,
+        os.path.join(validation_dir, "cell_scores.json")
     )
     
     enhanced_report = EnhancedValidationReport(
@@ -301,7 +325,8 @@ def run_enhanced_validation(
         ai_quality_score=ai_report.overall_quality_score,
         ai_summary=ai_report.summary,
         objective_grade=objective_report.data_quality_grade,
-        objective_narrative=objective_report.detailed_narrative
+        objective_narrative=objective_report.detailed_narrative,
+        table_score=scoring_report.table_score
     )
     
     enhanced_report_path = os.path.join(validation_dir, "enhanced_report.json")
@@ -314,6 +339,7 @@ def run_enhanced_validation(
         print("=" * 80)
         print(f"  AI Quality Score: {ai_report.overall_quality_score}/100")
         print(f"  Objective Grade: {objective_report.data_quality_grade}")
+        print(f"  Table Score: {scoring_report.table_score:.1f}/100")
         print(f"  Grounding Score: {grounding_report.grounding_score:.1%}")
         print(f"  Row Count Accuracy: {row_count_report.row_count_accuracy:.1%}")
         print(f"  Rule Pass Rate: {rule_pass_rate:.1%}")

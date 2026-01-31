@@ -34,7 +34,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { WorkflowVisualization } from "@/components/workflow/WorkflowVisualization";
-import { RunsAPI, Run, LogsResponse, EngineStatus, IPCMetadata, EngineLogsResponse, RunProgress, SchemaMapping, RunExtractedDataResponse, RunInspectionResponse, ValidationResult, EnhancedValidationReport, CacheStatsResponse, ApiAnalyticsResponse, CacheEvent, ApiCall } from "@/features/runs/api";
+import { RunsAPI, Run, LogsResponse, EngineStatus, IPCMetadata, EngineLogsResponse, RunProgress, SchemaMapping, RunExtractedDataResponse, RunInspectionResponse, ValidationResult, EnhancedValidationReport, CacheStatsResponse, ApiAnalyticsResponse, CacheEvent, ApiCall, ValidationScoresResponse } from "@/features/runs/api";
 import { SourcesAPI, type Source, type SourcePreview } from "@/features/sources/api";
 import { API_BASE_URL } from "@/lib/http";
 import {
@@ -1503,6 +1503,7 @@ export default function RunDetails() {
   const [validatedData, setValidatedData] = useState<RunExtractedDataResponse | null>(null);
   const [validatedDataPage, setValidatedDataPage] = useState(1);
   const [validatedDataPageSize, setValidatedDataPageSize] = useState(100);
+  const [validationScores, setValidationScores] = useState<ValidationScoresResponse | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -1604,6 +1605,16 @@ export default function RunDetails() {
     }
   };
 
+  const fetchValidationScores = async () => {
+    if (!id) return;
+    try {
+      const data = await RunsAPI.getValidationScores(id, true);
+      setValidationScores(data);
+    } catch (err: any) {
+      setValidationScores(null);
+    }
+  };
+
   const fetchInspection = async () => {
     if (!id) return;
     try {
@@ -1644,6 +1655,7 @@ export default function RunDetails() {
       fetchIpcMetadata(),
       fetchExtractedData(),
       fetchValidatedData(),
+      fetchValidationScores(),
       fetchSchemaMapping(),
       fetchProgress(),
     ]);
@@ -3519,11 +3531,18 @@ export default function RunDetails() {
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
                   <span>Validated Data (Accepted Rows)</span>
-                  {validatedData?.exists && validatedData.count > 0 && (
-                    <span className="text-sm font-normal text-muted-foreground">
-                      {validatedData.count} accepted entries
-                    </span>
-                  )}
+                  <div className="flex items-center gap-4">
+                    {validationScores?.exists && validationScores.table_score !== undefined && (
+                      <span className={`px-2 py-1 rounded text-sm font-medium ${validationScores.table_score >= 80 ? 'bg-green-100 text-green-700' : validationScores.table_score >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                        Table Score: {validationScores.table_score.toFixed(1)}/100
+                      </span>
+                    )}
+                    {validatedData?.exists && validatedData.count > 0 && (
+                      <span className="text-sm font-normal text-muted-foreground">
+                        {validatedData.count} accepted entries
+                      </span>
+                    )}
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -3540,36 +3559,75 @@ export default function RunDetails() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="rounded-md border overflow-x-auto">
-                      <div className="h-[500px] overflow-y-auto">
+                    <div className="rounded-md border overflow-auto max-h-[500px]">
+                      <div className="min-w-max">
                         <Table>
                           <TableHeader>
                             <TableRow>
-                              <TableHead className="w-12 whitespace-nowrap">#</TableHead>
+                              <TableHead className="w-12 whitespace-nowrap sticky left-0 bg-background z-10">#</TableHead>
+                              <TableHead className="w-16 whitespace-nowrap sticky left-12 bg-background z-10">Score</TableHead>
                               <TableHead className="whitespace-nowrap min-w-[220px]">Source</TableHead>
-                              {resolvedSchemaFields.map((col) => (
-                                <TableHead key={col} className="whitespace-nowrap min-w-[200px]">
-                                  {col}
-                                </TableHead>
-                              ))}
+                              {resolvedSchemaFields.map((col) => {
+                                const colScore = validationScores?.column_scores?.[col];
+                                return (
+                                  <TableHead key={col} className="whitespace-nowrap min-w-[200px]">
+                                    <div className="flex flex-col">
+                                      <span>{col}</span>
+                                      {colScore !== undefined && (
+                                        <span className={`text-xs font-normal ${colScore >= 80 ? 'text-green-600' : colScore >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                          {colScore.toFixed(0)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </TableHead>
+                                );
+                              })}
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {validatedData.data.map((entry: any, idx: number) => (
-                              <TableRow key={idx} className="align-top">
-                                <TableCell className="font-mono text-xs whitespace-nowrap">
-                                  {(validatedDataPage - 1) * validatedDataPageSize + idx + 1}
-                                </TableCell>
-                                <TableCell className="max-w-[220px] truncate text-xs whitespace-nowrap" title={entry.__source}>
-                                  {entry.__source || ""}
-                                </TableCell>
-                                {resolvedSchemaFields.map((col) => (
-                                  <TableCell key={col} className="max-w-[200px] truncate text-xs font-mono whitespace-nowrap">
-                                    {entry?.[col] ?? ""}
+                            {validatedData.data.map((entry: any, idx: number) => {
+                              const globalRowIdx = (validatedDataPage - 1) * validatedDataPageSize + idx;
+                              const rowScore = validationScores?.row_scores?.[String(globalRowIdx)];
+                              const cellScoresMap = new Map<string, number>();
+                              validationScores?.cell_scores?.forEach(cs => {
+                                if (cs.row === globalRowIdx) {
+                                  cellScoresMap.set(cs.column, cs.score);
+                                }
+                              });
+                              
+                              return (
+                                <TableRow key={idx} className="align-top">
+                                  <TableCell className="font-mono text-xs whitespace-nowrap sticky left-0 bg-background z-10">
+                                    {globalRowIdx + 1}
                                   </TableCell>
-                                ))}
-                              </TableRow>
-                            ))}
+                                  <TableCell className="text-xs whitespace-nowrap sticky left-12 bg-background z-10">
+                                    {rowScore !== undefined && (
+                                      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${rowScore >= 80 ? 'bg-green-100 text-green-700' : rowScore >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                                        {rowScore.toFixed(0)}
+                                      </span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="max-w-[220px] truncate text-xs whitespace-nowrap" title={entry.__source}>
+                                    {entry.__source || ""}
+                                  </TableCell>
+                                  {resolvedSchemaFields.map((col) => {
+                                    const cellScore = cellScoresMap.get(col);
+                                    const bgClass = cellScore !== undefined 
+                                      ? cellScore >= 80 ? '' : cellScore >= 50 ? 'bg-yellow-50' : 'bg-red-50'
+                                      : '';
+                                    return (
+                                      <TableCell 
+                                        key={col} 
+                                        className={`max-w-[200px] truncate text-xs font-mono whitespace-nowrap ${bgClass}`}
+                                        title={cellScore !== undefined ? `Score: ${cellScore.toFixed(0)}` : undefined}
+                                      >
+                                        {entry?.[col] ?? ""}
+                                      </TableCell>
+                                    );
+                                  })}
+                                </TableRow>
+                              );
+                            })}
                           </TableBody>
                         </Table>
                       </div>
