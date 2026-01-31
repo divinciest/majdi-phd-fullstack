@@ -33,7 +33,7 @@ from llm_client import call_openai
 from row_counter import RowCountingConfig, run_row_counting_phase, save_row_counting_result, chunk_row_descriptions, get_chunk_size_for_row_count
 from response_parser import parse_llm_response, parse_json_from_text
 from normalizer import normalize_entries, prune_empty_rows
-from cache_utils import get_cache_stats, clear_cache, set_cache_user
+from cache_utils import get_cache_stats, clear_cache, set_cache_user, set_cache_flags
 from csv_utils import ensure_output_dirs, write_csv_entries
 
 # Provider/model overrides for the two-call flow
@@ -62,7 +62,7 @@ if _cache_user_id:
 
 
 CONSTRAINED_ROWCOUNT_RETRIES = int(os.environ.get("CONSTRAINED_ROWCOUNT_RETRIES", "0"))
-FORCE_SINGLE_SHOT_CONSTRAINED = os.environ.get("FORCE_SINGLE_SHOT_CONSTRAINED", "0").strip().lower() in {"1", "true", "yes"}
+FORCE_SINGLE_SHOT_CONSTRAINED = os.environ.get("FORCE_SINGLE_SHOT_CONSTRAINED", "1").strip().lower() in {"1", "true", "yes"}
 
 
 def show_cache_stats():
@@ -86,6 +86,74 @@ def do_clear_cache():
         count = clear_cache(subdir)
         print(f"  {subdir}: {count} files deleted")
     print("Done!")
+
+
+def run_validation_postprocess(all_entries: list, validation_config_path: str, output_dir: str, schema_fields: list):
+    """Run validation post-processing on extracted data.
+    
+    Single source of truth for validation logic, used by both:
+    - Normal extraction flow (after extraction completes)
+    - Validation-only mode (--validation-only flag)
+    
+    Returns True if validation succeeded, False otherwise.
+    """
+    if not all_entries:
+        print(f"[VALIDATION] Skipping validation (no data to validate)")
+        return False
+    
+    if not validation_config_path or not os.path.isfile(validation_config_path):
+        print(f"ERROR: Validation config not found: {validation_config_path}", file=sys.stderr)
+        return False
+    
+    try:
+        import pandas as pd
+        from validation import load_validation_config, merge_validation_flags, create_composite_flags
+        from validation.rule_engine import RuleEngine
+        from validation.validation_utils import format_summary
+        
+        config = load_validation_config(validation_config_path)
+        print(f"✓ Loaded '{config.name}' ({len(config.rules)} rules)")
+        
+        df = pd.DataFrame(all_entries)
+        engine = RuleEngine(config)
+        report = engine.validate(df)
+        print(f"✓ Validation complete")
+        
+        validation_dir = os.path.join(output_dir, "validation")
+        os.makedirs(validation_dir, exist_ok=True)
+        
+        with open(os.path.join(validation_dir, 'validation_report.json'), 'w', encoding='utf-8') as f:
+            json.dump(report.to_dict(), f, indent=2)
+        
+        if report.row_results:
+            pd.DataFrame(report.row_results).to_csv(os.path.join(validation_dir, 'row_flags.csv'), index=False)
+        if report.paper_results:
+            pd.DataFrame(report.paper_results).to_csv(os.path.join(validation_dir, 'paper_metrics.csv'), index=False)
+        with open(os.path.join(validation_dir, 'validation_summary.txt'), 'w', encoding='utf-8') as f:
+            f.write(format_summary(report))
+        
+        df_validated = merge_validation_flags(df, report)
+        df_validated = create_composite_flags(df_validated, config)
+        accepted_df = df_validated[df_validated.get('row_accept_candidate', True)]
+        
+        clean_json = os.path.join(output_dir, "validated_data.json")
+        clean_csv = os.path.join(output_dir, "validated_data.csv")
+        accepted_df.to_json(clean_json, orient='records', indent=2)
+        write_csv_entries(clean_csv, accepted_df.to_dict('records'), schema_fields, mode='w')
+        
+        print(f"\nValidation Results:")
+        print(f"  Pass Rate: {report.summary.get('overall_pass_rate', 0):.1%}")
+        print(f"  Accepted: {len(accepted_df)}/{len(df)} rows")
+        print(f"  Outputs: {validation_dir}/")
+        print(f"  Clean Data: {clean_json}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"ERROR during validation: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 def main():
@@ -116,6 +184,39 @@ def main():
         "--no-cache-read", action="store_true",
         help="Disable cache reads but still write to cache (fresh calls, cached for future)"
     )
+    # Granular cache control per API class (read/write flags)
+    parser.add_argument(
+        "--cache-surya-read", type=lambda x: x.lower() == 'true', default=True,
+        help="Enable reading from Surya (PDF conversion) cache (default: true)"
+    )
+    parser.add_argument(
+        "--cache-surya-write", type=lambda x: x.lower() == 'true', default=True,
+        help="Enable writing to Surya (PDF conversion) cache (default: true)"
+    )
+    parser.add_argument(
+        "--cache-llm-read", type=lambda x: x.lower() == 'true', default=True,
+        help="Enable reading from LLM (extraction) cache (default: true)"
+    )
+    parser.add_argument(
+        "--cache-llm-write", type=lambda x: x.lower() == 'true', default=True,
+        help="Enable writing to LLM (extraction) cache (default: true)"
+    )
+    parser.add_argument(
+        "--cache-schema-read", type=lambda x: x.lower() == 'true', default=True,
+        help="Enable reading from schema inference cache (default: true)"
+    )
+    parser.add_argument(
+        "--cache-schema-write", type=lambda x: x.lower() == 'true', default=True,
+        help="Enable writing to schema inference cache (default: true)"
+    )
+    parser.add_argument(
+        "--cache-validation-read", type=lambda x: x.lower() == 'true', default=True,
+        help="Enable reading from validation config cache (default: true)"
+    )
+    parser.add_argument(
+        "--cache-validation-write", type=lambda x: x.lower() == 'true', default=True,
+        help="Enable writing to validation config cache (default: true)"
+    )
     parser.add_argument(
         "--validation-config",
         help="Path to validation config JSON. If provided, validation runs automatically after extraction."
@@ -133,6 +234,10 @@ def main():
         help="Disable LLM rejection comment generation when validation fails (enabled by default)"
     )
     parser.add_argument(
+        "--validation-only", action="store_true",
+        help="Skip extraction, only run validation on existing global_data.json"
+    )
+    parser.add_argument(
         "--log-file-path",
         help="Path to log file for execution details (enables logging)"
     )
@@ -147,6 +252,10 @@ def main():
     parser.add_argument(
         "--enable-row-counting", action="store_true",
         help="Enable row counting pre-analysis phase to constrain extraction"
+    )
+    parser.add_argument(
+        "--retry-for-cached-empty-list", type=lambda x: x.lower() == 'true', default=True,
+        help="Retry extraction when cached LLM response returns empty list (default: true)"
     )
     args = parser.parse_args()
 
@@ -247,6 +356,35 @@ def main():
         print("\n[INFO] Caching disabled - all API calls will be fresh, no cache writes")
     elif cache_write_only:
         print("\n[INFO] Cache write-only mode - fresh API calls, results will be cached")
+    
+    # Initialize granular cache flags
+    # If --no-cache is set, disable all; if --no-cache-read is set, disable reads only
+    if not use_cache:
+        set_cache_flags(
+            surya_read=False, surya_write=False,
+            llm_read=False, llm_write=False,
+            schema_read=False, schema_write=False,
+            validation_read=False, validation_write=False
+        )
+    elif cache_write_only:
+        set_cache_flags(
+            surya_read=False, surya_write=True,
+            llm_read=False, llm_write=True,
+            schema_read=False, schema_write=True,
+            validation_read=False, validation_write=True
+        )
+    else:
+        # Use granular flags from command line
+        set_cache_flags(
+            surya_read=getattr(args, 'cache_surya_read', True),
+            surya_write=getattr(args, 'cache_surya_write', True),
+            llm_read=getattr(args, 'cache_llm_read', True),
+            llm_write=getattr(args, 'cache_llm_write', True),
+            schema_read=getattr(args, 'cache_schema_read', True),
+            schema_write=getattr(args, 'cache_schema_write', True),
+            validation_read=getattr(args, 'cache_validation_read', True),
+            validation_write=getattr(args, 'cache_validation_write', True)
+        )
 
     # Setup output directories
     ensure_output_dirs(args.output_dir)
@@ -329,13 +467,51 @@ def main():
         except Exception as e:
             print(f"      → ERROR generating validation config: {e}")
 
+    # VALIDATION-ONLY MODE: Skip extraction, load existing data, jump to validation
+    if getattr(args, 'validation_only', False):
+        print(f"\n{'='*80}")
+        print(f"VALIDATION-ONLY MODE: Skipping extraction, running validation on existing data")
+        print(f"{'='*80}")
+        
+        if not os.path.isfile(global_json_path):
+            print(f"ERROR: No extracted data found at {global_json_path}", file=sys.stderr)
+            print(f"       Run extraction first before using --validation-only", file=sys.stderr)
+            sys.exit(1)
+        
+        with open(global_json_path, 'r', encoding='utf-8') as f:
+            all_entries = json.load(f)
+        
+        print(f"✓ Loaded {len(all_entries)} existing entries from {global_json_path}")
+        
+        if not args.validation_config and not args.validation_text:
+            print(f"ERROR: --validation-only requires --validation-config or --validation-text", file=sys.stderr)
+            sys.exit(1)
+        
+        # Run validation using shared function
+        print(f"\n[VALIDATION] Running validation on {len(all_entries)} entries")
+        print("="*80)
+        run_validation_postprocess(all_entries, args.validation_config, args.output_dir, schema_fields)
+        print("="*80)
+        
+        show_cache_stats()
+        print("Done! (validation-only mode)")
+        
+        if log_file:
+            from datetime import datetime
+            print(f"\n[LOG] Execution completed at {datetime.now().isoformat()}")
+            log_file.close()
+            sys.stdout = sys.__stdout__
+            sys.stderr = sys.__stderr__
+        
+        return  # Exit early, skip normal extraction flow
+
     # Initialize global CSV with headers (overwrite if exists to start fresh run)
     with open(global_csv_path, 'w', newline='', encoding='utf-8') as f:
         import csv
         writer = csv.writer(f)
         writer.writerow(schema_fields + ["__source"])
 
-    # 3. Find PDF files
+    # 3. Find PDF files1
     pdf_files = [f for f in os.listdir(args.pdfs) if f.lower().endswith(".pdf")]
     if not pdf_files:
         print(f"ERROR: No PDF files found in {args.pdfs}", file=sys.stderr)
@@ -419,9 +595,12 @@ def main():
         
         entries = []
         rejection_comment = None
+        row_count_mismatch = False
+        expected_row_count = None
         
         if row_count_result and row_count_result.winner_count > 0:
             total_rows = row_count_result.winner_count
+            expected_row_count = total_rows
             
             chunk_size = get_chunk_size_for_row_count(total_rows, len(schema_fields))
             
@@ -470,10 +649,11 @@ def main():
                                 system_prompt=CONSTRAINED_SYSTEM_PROMPT,
                                 schema_fields=schema_fields,
                                 filename=filename,
-                                use_cache=False,
+                                use_cache=use_cache,
                                 cache_write_only=cache_write_only,
                                 generate_rejection=False,
-                                pdf_text=content
+                                pdf_text=content,
+                                retry_for_cached_empty_list=getattr(args, 'retry_for_cached_empty_list', True)
                             )
                             last_count = len(chunk_entries)
                             if len(chunk_entries) == chunk_row_count:
@@ -489,19 +669,20 @@ def main():
 
                         if attempt == CONSTRAINED_ROWCOUNT_RETRIES:
                             print(
-                                f"      Batch {chunk_idx} row count mismatch after retries: "
-                                f"expected {chunk_row_count}, got {last_count}"
+                                f"      [WARNING] Batch {chunk_idx} row count mismatch after retries: "
+                                f"expected {chunk_row_count}, got {last_count} - accepting partial results"
                             )
-                            update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
-                            sys.exit(1)
+                            # Accept partial results instead of failing
+                            entries.extend(chunk_entries)
+                            update_progress(i - 1, len(pdf_files), filename, "running", len(all_entries) + len(entries))
+                            break
 
-                if len(entries) != total_rows:
+                row_count_mismatch = len(entries) != total_rows
+                if row_count_mismatch:
                     print(
-                        f"      Chunked extraction total mismatch: "
-                        f"expected {total_rows}, got {len(entries)}"
+                        f"      [WARNING] Chunked extraction total mismatch: "
+                        f"expected {total_rows}, got {len(entries)} - continuing with extracted data"
                     )
-                    update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
-                    sys.exit(1)
             else:
                 print(f"      → Using constrained extraction (target: {total_rows} rows)")
                 user_prompt = synthesize_constrained_extraction_prompt(
@@ -533,10 +714,11 @@ def main():
                             system_prompt=CONSTRAINED_SYSTEM_PROMPT,
                             schema_fields=schema_fields,
                             filename=filename,
-                            use_cache=False,
+                            use_cache=use_cache,
                             cache_write_only=cache_write_only,
                             generate_rejection=not getattr(args, 'no_rejection_comment', False),
-                            pdf_text=content
+                            pdf_text=content,
+                            retry_for_cached_empty_list=getattr(args, 'retry_for_cached_empty_list', True)
                         )
                         last_count = len(entries)
                         if len(entries) == total_rows:
@@ -544,15 +726,26 @@ def main():
                             break
                         if attempt == CONSTRAINED_ROWCOUNT_RETRIES:
                             print(
-                                f"      Row count mismatch after retries: "
-                                f"expected {total_rows}, got {len(entries)}"
+                                f"      [WARNING] Row count mismatch after retries: "
+                                f"expected {total_rows}, got {len(entries)} - continuing with extracted data"
                             )
-                            update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
-                            sys.exit(1)
+                            row_count_mismatch = True
+                            break
+                    row_count_mismatch = len(entries) != total_rows
                 except Exception as e:
-                    print(f"      Extraction aborted: {e}")
-                    update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
-                    sys.exit(1)
+                    print(f"      → Extraction failed for this source: {e}")
+                    print(f"      → Skipping {filename}, continuing with other sources...")
+                    # Save error metadata for this source
+                    error_metadata = {
+                        "filename": filename,
+                        "error": str(e),
+                        "skipped": True,
+                        "extracted_rows": 0
+                    }
+                    error_metadata_path = os.path.join(args.output_dir, "sources", f"{os.path.splitext(filename)[0]}_metadata.json")
+                    with open(error_metadata_path, 'w', encoding='utf-8') as f:
+                        json.dump(error_metadata, f, indent=2, ensure_ascii=False)
+                    continue
         else:
             user_prompt = synthesize_extraction_prompt(schema, instructions, content)
             try:
@@ -569,12 +762,23 @@ def main():
                     use_cache=use_cache,
                     cache_write_only=cache_write_only,
                     generate_rejection=not getattr(args, 'no_rejection_comment', False),
-                    pdf_text=content
+                    pdf_text=content,
+                    retry_for_cached_empty_list=getattr(args, 'retry_for_cached_empty_list', True)
                 )
             except Exception as e:
-                print(f"      Extraction aborted: {e}")
-                update_progress(i - 1, len(pdf_files), filename, "failed", len(all_entries) + len(entries))
-                sys.exit(1)
+                print(f"      → Extraction failed for this source: {e}")
+                print(f"      → Skipping {filename}, continuing with other sources...")
+                # Save error metadata for this source
+                error_metadata = {
+                    "filename": filename,
+                    "error": str(e),
+                    "skipped": True,
+                    "extracted_rows": 0
+                }
+                error_metadata_path = os.path.join(args.output_dir, "sources", f"{os.path.splitext(filename)[0]}_metadata.json")
+                with open(error_metadata_path, 'w', encoding='utf-8') as f:
+                    json.dump(error_metadata, f, indent=2, ensure_ascii=False)
+                continue
         
         # Handle rejection comment if generated
         if rejection_comment:
@@ -584,6 +788,26 @@ def main():
                 f.write("="*60 + "\n\n")
                 f.write(rejection_comment)
             print(f"      → Rejection comment saved: {rejection_path}")
+        
+        # Save source metadata (row count logic + rejection) for server to read
+        source_metadata = {
+            "filename": filename,
+            "row_count": row_count_result.winner_count if row_count_result else None,
+            "row_count_logic": row_count_result.winner_logic if row_count_result else None,
+            "row_count_reasoning": row_count_result.judge_reasoning if row_count_result else None,
+            "all_candidates": {
+                cid: {"count": c.count, "logic": c.logic}
+                for cid, c in (row_count_result.all_candidates.items() if row_count_result else {})
+            } if row_count_result else None,
+            "rejection_reason": rejection_comment,
+            "extracted_rows": len(entries),
+            "row_count_mismatch": row_count_mismatch,
+            "expected_row_count": expected_row_count,
+        }
+        metadata_path = os.path.join(args.output_dir, "sources", f"{os.path.splitext(filename)[0]}_metadata.json")
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(source_metadata, f, indent=2, ensure_ascii=False)
+        print(f"      → Source metadata saved: {metadata_path}")
         
         print(f"      → Extracted {len(entries)} entries")
         
@@ -615,63 +839,11 @@ def main():
     with open(global_json_path, "w", encoding="utf-8") as f:
         json.dump(all_entries, f, indent=2, ensure_ascii=False)
     
-    # 6. VALIDATION POST-PROCESSING
+    # 6. VALIDATION POST-PROCESSING (using shared function)
     if args.validation_config and len(all_entries) > 0:
         print(f"\n[5/5] POST-PROCESSING: Data Validation")
         print("="*80)
-        
-        if not os.path.isfile(args.validation_config):
-            print(f"ERROR: Validation config not found: {args.validation_config}", file=sys.stderr)
-        else:
-            try:
-                import pandas as pd
-                from validation import load_validation_config, merge_validation_flags, create_composite_flags
-                from validation.rule_engine import RuleEngine
-                from validation.validation_utils import format_summary
-                
-                # Load config and run validation
-                config = load_validation_config(args.validation_config)
-                print(f"✓ Loaded '{config.name}' ({len(config.rules)} rules)")
-                
-                df = pd.DataFrame(all_entries)
-                engine = RuleEngine(config)
-                report = engine.validate(df)
-                print(f"✓ Validation complete")
-                
-                # Save validation outputs
-                validation_dir = os.path.join(args.output_dir, "validation")
-                os.makedirs(validation_dir, exist_ok=True)
-                
-                # Save JSON report for server to read
-                import json as json_module
-                with open(os.path.join(validation_dir, 'validation_report.json'), 'w', encoding='utf-8') as f:
-                    json_module.dump(report.to_dict(), f, indent=2)
-                
-                if report.row_results:
-                    pd.DataFrame(report.row_results).to_csv(os.path.join(validation_dir, 'row_flags.csv'), index=False)
-                if report.paper_results:
-                    pd.DataFrame(report.paper_results).to_csv(os.path.join(validation_dir, 'paper_metrics.csv'), index=False)
-                with open(os.path.join(validation_dir, 'validation_summary.txt'), 'w', encoding='utf-8') as f:
-                    f.write(format_summary(report))
-                
-                # Create and save validated dataset
-                df_validated = merge_validation_flags(df, report)
-                df_validated = create_composite_flags(df_validated, config)
-                accepted_df = df_validated[df_validated.get('row_accept_candidate', True)]
-                
-                clean_json = os.path.join(args.output_dir, "validated_data.json")
-                clean_csv = os.path.join(args.output_dir, "validated_data.csv")
-                accepted_df.to_json(clean_json, orient='records', indent=2)
-                write_csv_entries(clean_csv, accepted_df.to_dict('records'), schema_fields, mode='w')
-                
-                print(f"\nValidation Results:")
-                print(f"  Pass Rate: {report.summary.get('overall_pass_rate', 0):.1%}")
-                print(f"  Accepted: {len(accepted_df)}/{len(df)} rows")
-                print(f"  Outputs: {validation_dir}/")
-                print(f"  Clean Data: {clean_json}")
-                
-            except Exception as e:
-                print(f"ERROR during validation: {e}", file=sys.stderr)
+        run_validation_postprocess(all_entries, args.validation_config, args.output_dir, schema_fields)
         print("="*80)
     elif args.validation_config and len(all_entries) == 0:
         print(f"\n[5/5] Skipping validation (no data extracted)")

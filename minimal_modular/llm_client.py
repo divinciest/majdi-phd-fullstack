@@ -249,7 +249,16 @@ def call_openai(
             print(f"      [CACHE HIT] {active_provider.upper()}: {cache_key_model}")
             return cached
     
-    # Call appropriate API
+    # Log cache miss and network call
+    if cache_write_only:
+        print(f"      [CACHE SKIP] {active_provider.upper()}: {cache_key_model} (write-only mode)")
+    else:
+        print(f"      [CACHE MISS] {active_provider.upper()}: {cache_key_model} → Making API call...")
+    
+    # Call appropriate API with timing
+    import time
+    api_start_time = time.time()
+    
     if active_provider == "openai":
         response = call_openai_api(system_prompt, user_prompt, model, timeout)
     elif active_provider == "gemini":
@@ -258,6 +267,9 @@ def call_openai(
         response = call_anthropic_api(system_prompt, user_prompt, model, timeout)
     else:  # deepseek
         response = call_deepseek_api(system_prompt, user_prompt, model, timeout)
+    
+    api_duration_ms = int((time.time() - api_start_time) * 1000)
+    print(f"      [API CALL] {active_provider.upper()}: {model} completed in {api_duration_ms}ms")
     
     # Cache the result (write even if cache_write_only)
     if use_cache or cache_write_only:

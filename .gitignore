@@ -47,3 +47,8 @@ Thumbs.db
 minimal_modular/uploads/**
 minimal_modular/ipc/*/*
 minimal_modular/config.py
+
+# Database files (too large for GitHub)
+*.db
+*.db-shm
+*.db-wal

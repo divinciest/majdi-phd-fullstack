@@ -13,6 +13,7 @@ import subprocess
 import hashlib
 import secrets
 import shutil
+import re
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, Response, send_file, stream_with_context, g
@@ -189,6 +190,9 @@ def init_db():
         "ALTER TABLE sources ADD COLUMN error TEXT",
         "ALTER TABLE sources ADD COLUMN meta_source_id TEXT",
         "ALTER TABLE sources ADD COLUMN updated_at TEXT",
+        "ALTER TABLE sources ADD COLUMN row_count INTEGER",
+        "ALTER TABLE sources ADD COLUMN row_count_logic TEXT",
+        "ALTER TABLE sources ADD COLUMN rejection_reason TEXT",
     ]:
         try:
             cur.execute(stmt)
@@ -210,6 +214,7 @@ def init_db():
         "ALTER TABLE runs ADD COLUMN validation_pass_rate REAL",
         "ALTER TABLE runs ADD COLUMN validation_accepted_count INTEGER",
         "ALTER TABLE runs ADD COLUMN validation_rejected_count INTEGER",
+        "ALTER TABLE runs ADD COLUMN cache_flags TEXT",
     ]:
         try:
             cur.execute(stmt)
@@ -881,6 +886,26 @@ def seed_default_config():
             "display_order": 12
         },
         {
+            "key": "RETRY_FOR_CACHED_EMPTY_LIST",
+            "value": "true",
+            "value_type": "boolean",
+            "input_type": "switch",
+            "default_value": "true",
+            "category": "extraction",
+            "description": "Retry extraction when cached LLM response returns empty list",
+            "display_order": 13
+        },
+        {
+            "key": "VALIDATION_RETRIES",
+            "value": "1",
+            "value_type": "number",
+            "input_type": "number",
+            "default_value": "1",
+            "category": "extraction",
+            "description": "Number of validation retry attempts per source (0 = no validation, 1 = validate once, 2+ = retry on failure)",
+            "display_order": 14
+        },
+        {
             "key": "CHUNK_SIZE",
             "value": "10",
             "value_type": "number",
@@ -888,7 +913,7 @@ def seed_default_config():
             "default_value": "10",
             "category": "extraction",
             "description": "Number of pages per extraction chunk",
-            "display_order": 13
+            "display_order": 14
         },
         {
             "key": "CHUNK_OVERLAP",
@@ -1261,14 +1286,18 @@ def get_file_internal_path(file_id: str) -> str:
         return os.path.join(EXPORTS_FOLDER, run_id, filename)
     elif file_type == "zip":
         return os.path.join(UPLOAD_FOLDER, run_id, filename)
+    elif file_type in ("validation_prompt", "extraction_prompt"):
+        return os.path.join(UPLOAD_FOLDER, run_id, filename)
     else:
-        return None
+        # Default: assume it's in the uploads folder for the run
+        return os.path.join(UPLOAD_FOLDER, run_id, filename) if run_id else None
 
 def spawn_extraction_process(run_id: str, pdfs_dir: str, excel_path: str, output_dir: str, 
                              instructions: str = "", llm_provider: str = "openai",
                              enable_row_counting: bool = False, user_id: str = None,
                              validation_prompt_path: str = None, validation_enabled: bool = False,
-                             validation_max_retries: int = 3):
+                             validation_max_retries: int = 3,
+                             cache_flags: dict = None):
     """
     Spawn extract.py as subprocess for a run.
     Captures stdout/stderr to IPC directory for logging.
@@ -1326,7 +1355,39 @@ def spawn_extraction_process(run_id: str, pdfs_dir: str, excel_path: str, output
                     pass
             return default_value
 
+        def _get_bool_config_value(key: str, user_id_for_config: str, default_value: bool) -> bool:
+            try:
+                conn = get_db()
+                cur = conn.cursor()
+
+                if user_id_for_config:
+                    cur.execute(
+                        "SELECT value FROM config WHERE key = ? AND user_id = ?",
+                        (key, user_id_for_config),
+                    )
+                    row = cur.fetchone()
+                    if row and row["value"] is not None and str(row["value"]).strip() != "":
+                        conn.close()
+                        return str(row["value"]).lower() in ("true", "1", "yes")
+
+                cur.execute(
+                    "SELECT value FROM config WHERE key = ? AND user_id IS NULL",
+                    (key,),
+                )
+                row = cur.fetchone()
+                conn.close()
+                if row and row["value"] is not None and str(row["value"]).strip() != "":
+                    return str(row["value"]).lower() in ("true", "1", "yes")
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            return default_value
+
         max_retries = _get_int_config_value("MAX_RETRIES", user_id, 0)
+        retry_for_cached_empty_list = _get_bool_config_value("RETRY_FOR_CACHED_EMPTY_LIST", user_id, True)
+        validation_retries_config = _get_int_config_value("VALIDATION_RETRIES", user_id, 1)
 
         # Build command
         cmd = [
@@ -1351,13 +1412,23 @@ def spawn_extraction_process(run_id: str, pdfs_dir: str, excel_path: str, output
         if enable_row_counting:
             cmd.append("--enable-row-counting")
         
+        # Add retry for cached empty list flag
+        cmd.extend(["--retry-for-cached-empty-list", str(retry_for_cached_empty_list).lower()])
+        
+        # Add granular cache flags if provided
+        if cache_flags:
+            for flag_name in ["surya_read", "surya_write", "llm_read", "llm_write", 
+                              "schema_read", "schema_write", "validation_read", "validation_write"]:
+                if flag_name in cache_flags:
+                    cli_flag = f"--cache-{flag_name.replace('_', '-')}"
+                    cmd.extend([cli_flag, str(cache_flags[flag_name]).lower()])
+        
         # Add validation if enabled and validation prompt path provided
         if validation_enabled and validation_prompt_path and os.path.exists(validation_prompt_path):
             cmd.extend(["--validation-text", validation_prompt_path])
-            # Use validation_max_retries for retries when validation is enabled
-            if validation_max_retries > 0:
-                # Override max_retries with validation_max_retries
-                cmd = [c for c in cmd if c != "--retries" and not (cmd[cmd.index(c)-1:cmd.index(c)] == ["--retries"] if cmd.index(c) > 0 else False)]
+            # Use run-specific validation_max_retries if set, otherwise use global config
+            effective_validation_retries = validation_max_retries if validation_max_retries > 0 else validation_retries_config
+            if effective_validation_retries > 0:
                 # Remove existing --retries if present
                 new_cmd = []
                 skip_next = False
@@ -1370,7 +1441,7 @@ def spawn_extraction_process(run_id: str, pdfs_dir: str, excel_path: str, output
                         continue
                     new_cmd.append(c)
                 cmd = new_cmd
-                cmd.extend(["--retries", str(validation_max_retries)])
+                cmd.extend(["--retries", str(effective_validation_retries)])
         
         # Set environment for LLM provider
         env = os.environ.copy()
@@ -1479,6 +1550,143 @@ def spawn_extraction_process(run_id: str, pdfs_dir: str, excel_path: str, output
     
     # Start in background thread
     thread = threading.Thread(target=run_extraction, daemon=True)
+    thread.start()
+    return thread
+
+
+def spawn_validation_only_process(run_id: str, pdfs_dir: str, excel_path: str, output_dir: str,
+                                   validation_prompt_path: str, user_id: str = None,
+                                   cache_flags: dict = None):
+    """
+    Spawn extract.py with --validation-only flag.
+    Skips extraction, only runs validation on existing global_data.json.
+    Logs are appended to existing IPC logs.
+    """
+    def update_run_status(run_id: str, new_status: str, error_message: str = None):
+        """Helper to update run status."""
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("UPDATE runs SET status = ? WHERE id = ?", (new_status, run_id))
+        conn.commit()
+        conn.close()
+    
+    def run_validation():
+        run_ipc_dir = os.path.join(IPC_DIR, run_id)
+        os.makedirs(run_ipc_dir, exist_ok=True)
+        
+        # Append to existing logs (use 'a' mode)
+        stdout_path = os.path.join(run_ipc_dir, "stdout.log")
+        stderr_path = os.path.join(run_ipc_dir, "stderr.log")
+        
+        # Build command with --validation-only flag
+        cmd = [
+            sys.executable, EXTRACT_SCRIPT,
+            "--pdfs", pdfs_dir,
+            "--excel", excel_path,
+            "--output-dir", output_dir,
+            "--log-file-path", os.path.join(run_ipc_dir, "extraction.log"),
+            "--validation-only",
+            "--validation-text", validation_prompt_path
+        ]
+        
+        # Add granular cache flags if provided
+        if cache_flags:
+            for flag_name in ["surya_read", "surya_write", "llm_read", "llm_write", 
+                              "schema_read", "schema_write", "validation_read", "validation_write"]:
+                if flag_name in cache_flags:
+                    cli_flag = f"--cache-{flag_name.replace('_', '-')}"
+                    cmd.extend([cli_flag, str(cache_flags[flag_name]).lower()])
+        
+        # Set environment
+        env = os.environ.copy()
+        if user_id:
+            env["CACHE_USER_ID"] = user_id
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+        
+        log_message(f"Starting validation-only process for run {run_id[:8]}", "INFO", run_id)
+        
+        # Update status to running (validation phase)
+        update_run_status(run_id, "validating")
+        
+        try:
+            # Append to existing logs
+            with open(stdout_path, "a", encoding="utf-8") as stdout_file, \
+                 open(stderr_path, "a", encoding="utf-8") as stderr_file:
+                
+                # Add separator in logs
+                stdout_file.write(f"\n\n{'='*80}\n")
+                stdout_file.write(f"[VALIDATION-ONLY MODE] Started at {datetime.now(timezone.utc).isoformat()}\n")
+                stdout_file.write(f"{'='*80}\n\n")
+                stdout_file.flush()
+                
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    env=env,
+                    cwd=os.path.dirname(EXTRACT_SCRIPT)
+                )
+                active_processes[run_id] = process
+                
+                # Wait for completion
+                return_code = process.wait()
+                
+                # Remove from active processes
+                if run_id in active_processes:
+                    del active_processes[run_id]
+                
+                if return_code == 0:
+                    # Parse validation results
+                    validation_pass_rate = None
+                    validation_accepted = None
+                    validation_rejected = None
+                    validation_report_path = os.path.join(output_dir, "validation", "validation_report.json")
+                    if os.path.exists(validation_report_path):
+                        try:
+                            with open(validation_report_path, "r", encoding="utf-8") as f:
+                                val_report = json.load(f)
+                            validation_pass_rate = val_report.get("summary", {}).get("overall_pass_rate")
+                            row_results = val_report.get("row_results", [])
+                            if row_results:
+                                validation_accepted = sum(1 for r in row_results if r.get("row_accept_candidate", True))
+                                validation_rejected = len(row_results) - validation_accepted
+                        except:
+                            pass
+                    
+                    # Update run with validation results
+                    conn = get_db()
+                    cur = conn.cursor()
+                    cur.execute("""
+                        UPDATE runs SET status = ?,
+                        validation_pass_rate = ?, validation_accepted_count = ?, validation_rejected_count = ?
+                        WHERE id = ?
+                    """, ("completed", validation_pass_rate, validation_accepted, validation_rejected, run_id))
+                    conn.commit()
+                    conn.close()
+                    
+                    log_message(f"Validation completed: pass_rate={validation_pass_rate}, accepted={validation_accepted}, rejected={validation_rejected}", "INFO", run_id)
+                else:
+                    # Read stderr for error message
+                    error_msg = ""
+                    try:
+                        with open(stderr_path, "r") as f:
+                            error_msg = f.read()[-1000:]
+                    except:
+                        pass
+                    
+                    update_run_status(run_id, "failed", error_message=error_msg)
+                    log_message(f"Validation failed with code {return_code}", "ERROR", run_id)
+                
+        except Exception as e:
+            log_message(f"Validation error: {str(e)}", "ERROR", run_id)
+            update_run_status(run_id, "failed", error_message=str(e))
+            
+            if run_id in active_processes:
+                del active_processes[run_id]
+    
+    # Start in background thread
+    thread = threading.Thread(target=run_validation, daemon=True)
     thread.start()
     return thread
 
@@ -1658,9 +1866,23 @@ def list_runs():
     
     results = []
     for row in rows:
-        result = to_camel_dict(dict(row))
+        run = dict(row)
+        result = to_camel_dict(run)
         result["searchMethods"] = json.loads(result.get("searchMethods") or "[]")
         result["searchQueries"] = json.loads(result.get("searchQueries") or "[]")
+        
+        # Get live data_entries_count from global_data.json if available
+        output_dir = run.get("output_dir")
+        if output_dir:
+            global_json = os.path.join(output_dir, "global_data.json")
+            if os.path.exists(global_json):
+                try:
+                    with open(global_json, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        result["dataEntriesCount"] = len(data) if isinstance(data, list) else 0
+                except:
+                    pass
+        
         results.append(result)
 
     return jsonify({"items": results, "total": total, "page": page, "pageSize": page_size})
@@ -1900,6 +2122,26 @@ def create_run():
         validation_max_retries = int(request.form.get("validationMaxRetries", "3"))
         now = datetime.now(timezone.utc).isoformat()
         
+        # Parse cache flags from form data (JSON string or individual fields)
+        cache_flags = None
+        cache_flags_json = request.form.get("cacheFlags")
+        if cache_flags_json:
+            try:
+                cache_flags = json.loads(cache_flags_json)
+            except:
+                pass
+        if not cache_flags:
+            # Try individual fields
+            cache_flags = {}
+            for flag in ["surya_read", "surya_write", "llm_read", "llm_write", 
+                         "schema_read", "schema_write", "validation_read", "validation_write"]:
+                form_key = f"cache_{flag.replace('_', '')}"  # e.g., cache_suryaread
+                val = request.form.get(form_key)
+                if val is not None:
+                    cache_flags[flag] = val.lower() == "true"
+            if not cache_flags:
+                cache_flags = None
+        
         # Register files in database (paths stored internally, IDs exposed to frontend)
         zip_file_id = register_file(zip_path, pdfs_zip.filename, "zip", run_id, "application/zip")
         schema_file_id = register_file(excel_path, excel_file.filename, "schema", run_id, 
@@ -1952,8 +2194,9 @@ def create_run():
             INSERT INTO runs (id, name, status, start_date, llm_provider, pdfs_dir, excel_path, output_dir, 
                               prompt, search_methods, search_queries, links, table_file_url, per_link_prompt, 
                               sources_count, schema_file_id, zip_file_id, enable_row_counting, user_id, meta_source_id,
-                              extraction_prompt_file_id, validation_prompt_file_id, validation_enabled, validation_max_retries)
-            VALUES (?, ?, 'waiting', ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              extraction_prompt_file_id, validation_prompt_file_id, validation_enabled, validation_max_retries,
+                              cache_flags)
+            VALUES (?, ?, 'waiting', ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             run_id,
             name,
@@ -1972,7 +2215,8 @@ def create_run():
             extraction_prompt_file_id,
             validation_prompt_file_id,
             1 if validation_enabled else 0,
-            validation_max_retries
+            validation_max_retries,
+            json.dumps(cache_flags) if cache_flags else None
         ))
 
         # Insert sources rows immediately for each PDF file (PENDING)
@@ -2877,6 +3121,229 @@ def get_engine_logs(run_id):
         "total": len(log_entries)
     })
 
+
+@app.route("/runs/<run_id>/cache", methods=["GET"])
+def get_run_cache_stats(run_id):
+    """Get cache hit/miss statistics for a run.
+    
+    Parses extraction logs and stdout for cache-related messages.
+    Returns categorized cache events by provider (Surya, Gemini, OpenAI, etc.)
+    """
+    import re
+    
+    run_ipc_dir = os.path.join(IPC_DIR, run_id)
+    stdout_path = os.path.join(run_ipc_dir, "stdout.log")
+    extraction_log_path = os.path.join(run_ipc_dir, "extraction.log")
+    
+    cache_events = []
+    
+    # Patterns to match cache log lines
+    cache_hit_pattern = re.compile(r'\[CACHE HIT\]\s*(\w+):\s*(.+)')
+    cache_miss_pattern = re.compile(r'\[CACHE MISS\]\s*(\w+):\s*(.+?)(?:\s*→.*)?$')
+    cache_skip_pattern = re.compile(r'\[CACHE SKIP\]\s*(\w+):\s*(.+)')
+    surya_hit_pattern = re.compile(r'\[CACHE HIT\]\s*Surya:\s*(.+)')
+    gpt_hit_pattern = re.compile(r'\[CACHE HIT\]\s*GPT response')
+    
+    def parse_log_file(filepath, source_name):
+        if not os.path.exists(filepath):
+            return
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Check for cache hit
+                hit_match = cache_hit_pattern.search(line)
+                if hit_match:
+                    provider = hit_match.group(1).upper()
+                    details = hit_match.group(2).strip()
+                    cache_events.append({
+                        "type": "hit",
+                        "provider": provider,
+                        "details": details,
+                        "source": source_name,
+                        "line": line_num,
+                        "raw": line
+                    })
+                    continue
+                
+                # Check for cache miss
+                miss_match = cache_miss_pattern.search(line)
+                if miss_match:
+                    provider = miss_match.group(1).upper()
+                    details = miss_match.group(2).strip()
+                    cache_events.append({
+                        "type": "miss",
+                        "provider": provider,
+                        "details": details,
+                        "source": source_name,
+                        "line": line_num,
+                        "raw": line
+                    })
+                    continue
+                
+                # Check for cache skip
+                skip_match = cache_skip_pattern.search(line)
+                if skip_match:
+                    provider = skip_match.group(1).upper()
+                    details = skip_match.group(2).strip()
+                    cache_events.append({
+                        "type": "skip",
+                        "provider": provider,
+                        "details": details,
+                        "source": source_name,
+                        "line": line_num,
+                        "raw": line
+                    })
+                    continue
+                
+                # Legacy GPT response hit
+                if gpt_hit_pattern.search(line):
+                    cache_events.append({
+                        "type": "hit",
+                        "provider": "GPT",
+                        "details": "GPT response",
+                        "source": source_name,
+                        "line": line_num,
+                        "raw": line
+                    })
+    
+    # Parse both log files
+    parse_log_file(stdout_path, "stdout")
+    parse_log_file(extraction_log_path, "extraction")
+    
+    # Compute summary statistics
+    summary = {
+        "totalHits": sum(1 for e in cache_events if e["type"] == "hit"),
+        "totalMisses": sum(1 for e in cache_events if e["type"] == "miss"),
+        "totalSkips": sum(1 for e in cache_events if e["type"] == "skip"),
+        "byProvider": {}
+    }
+    
+    for event in cache_events:
+        provider = event["provider"]
+        if provider not in summary["byProvider"]:
+            summary["byProvider"][provider] = {"hits": 0, "misses": 0, "skips": 0}
+        if event["type"] == "hit":
+            summary["byProvider"][provider]["hits"] += 1
+        elif event["type"] == "miss":
+            summary["byProvider"][provider]["misses"] += 1
+        elif event["type"] == "skip":
+            summary["byProvider"][provider]["skips"] += 1
+    
+    # Calculate hit rate per provider
+    for provider, stats in summary["byProvider"].items():
+        total = stats["hits"] + stats["misses"] + stats["skips"]
+        stats["total"] = total
+        stats["hitRate"] = round(stats["hits"] / total * 100, 1) if total > 0 else 0
+    
+    return jsonify({
+        "runId": run_id,
+        "events": cache_events,
+        "summary": summary,
+        "total": len(cache_events)
+    })
+
+
+@app.route("/runs/<run_id>/api-analytics", methods=["GET"])
+def get_run_api_analytics(run_id):
+    """Get API call analytics for a run.
+    
+    Parses extraction logs for API call timing information.
+    Returns per-provider statistics including call count, total time, and averages.
+    """
+    import re
+    
+    run_ipc_dir = os.path.join(IPC_DIR, run_id)
+    stdout_path = os.path.join(run_ipc_dir, "stdout.log")
+    extraction_log_path = os.path.join(run_ipc_dir, "extraction.log")
+    
+    api_calls = []
+    
+    # Pattern to match API call timing logs: [API CALL] PROVIDER: model completed in Xms
+    api_call_pattern = re.compile(r'\[API CALL\]\s*(\w+):\s*([^\s]+)\s+completed in\s+(\d+)ms')
+    
+    def parse_log_file(filepath, source_name):
+        if not os.path.exists(filepath):
+            return
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                
+                match = api_call_pattern.search(line)
+                if match:
+                    provider = match.group(1).upper()
+                    model = match.group(2)
+                    duration_ms = int(match.group(3))
+                    api_calls.append({
+                        "provider": provider,
+                        "model": model,
+                        "durationMs": duration_ms,
+                        "source": source_name,
+                        "line": line_num
+                    })
+    
+    # Parse both log files
+    parse_log_file(stdout_path, "stdout")
+    parse_log_file(extraction_log_path, "extraction")
+    
+    # Compute summary statistics
+    summary = {
+        "totalCalls": len(api_calls),
+        "totalTimeMs": sum(c["durationMs"] for c in api_calls),
+        "avgTimeMs": 0,
+        "byProvider": {}
+    }
+    
+    if api_calls:
+        summary["avgTimeMs"] = round(summary["totalTimeMs"] / len(api_calls))
+    
+    for call in api_calls:
+        provider = call["provider"]
+        if provider not in summary["byProvider"]:
+            summary["byProvider"][provider] = {
+                "calls": 0,
+                "totalTimeMs": 0,
+                "avgTimeMs": 0,
+                "minTimeMs": float('inf'),
+                "maxTimeMs": 0,
+                "models": {}
+            }
+        
+        stats = summary["byProvider"][provider]
+        stats["calls"] += 1
+        stats["totalTimeMs"] += call["durationMs"]
+        stats["minTimeMs"] = min(stats["minTimeMs"], call["durationMs"])
+        stats["maxTimeMs"] = max(stats["maxTimeMs"], call["durationMs"])
+        
+        # Track per-model stats
+        model = call["model"]
+        if model not in stats["models"]:
+            stats["models"][model] = {"calls": 0, "totalTimeMs": 0}
+        stats["models"][model]["calls"] += 1
+        stats["models"][model]["totalTimeMs"] += call["durationMs"]
+    
+    # Calculate averages
+    for provider, stats in summary["byProvider"].items():
+        if stats["calls"] > 0:
+            stats["avgTimeMs"] = round(stats["totalTimeMs"] / stats["calls"])
+        if stats["minTimeMs"] == float('inf'):
+            stats["minTimeMs"] = 0
+        for model_stats in stats["models"].values():
+            if model_stats["calls"] > 0:
+                model_stats["avgTimeMs"] = round(model_stats["totalTimeMs"] / model_stats["calls"])
+    
+    return jsonify({
+        "runId": run_id,
+        "calls": api_calls,
+        "summary": summary,
+        "total": len(api_calls)
+    })
+
+
 @app.route("/runs/<run_id>/progress", methods=["GET"])
 def get_run_progress(run_id):
     """Get extraction progress for a run.
@@ -3049,6 +3516,15 @@ def start_run(run_id):
                 file_run_id = vp_row["run_id"] or run_id
                 validation_prompt_path = os.path.join(UPLOAD_FOLDER, file_run_id, vp_row["filename"])
         
+        # Parse cache flags from run
+        cache_flags = None
+        cache_flags_str = run.get("cache_flags")
+        if cache_flags_str:
+            try:
+                cache_flags = json.loads(cache_flags_str)
+            except:
+                pass
+        
         # Spawn extraction process
         spawn_extraction_process(
             run_id=run_id,
@@ -3061,7 +3537,8 @@ def start_run(run_id):
             user_id=run.get("user_id"),
             validation_prompt_path=validation_prompt_path,
             validation_enabled=validation_enabled,
-            validation_max_retries=validation_max_retries
+            validation_max_retries=validation_max_retries,
+            cache_flags=cache_flags
         )
         
         return jsonify({"message": "PDF extraction started", "runId": run_id, "sourceType": "pdf"}), 202
@@ -3161,6 +3638,35 @@ def retry_run(run_id):
     prompt = src.get("prompt") or ""
     enable_row_counting = 1 if bool(src.get("enable_row_counting", 0)) else 0
     name = normalize_retry_name(src.get("name") or "Untitled Run")
+    
+    # Copy validation and prompt settings from source run
+    src_extraction_prompt_file_id = src.get("extraction_prompt_file_id")
+    src_validation_prompt_file_id = src.get("validation_prompt_file_id")
+    validation_enabled = 1 if bool(src.get("validation_enabled", 0)) else 0
+    validation_max_retries = src.get("validation_max_retries") or 3
+    src_cache_flags = src.get("cache_flags")
+    
+    # Copy extraction prompt file if exists
+    new_extraction_prompt_file_id = None
+    new_extraction_prompt_path = None
+    if src_extraction_prompt_file_id:
+        src_ep_path = get_file_internal_path(src_extraction_prompt_file_id)
+        if src_ep_path and os.path.isfile(src_ep_path):
+            ep_filename = secure_filename(os.path.basename(src_ep_path))
+            new_extraction_prompt_path = os.path.join(run_upload_dir, ep_filename)
+            shutil.copy2(src_ep_path, new_extraction_prompt_path)
+            new_extraction_prompt_file_id = register_file(new_extraction_prompt_path, ep_filename, "extraction_prompt", new_run_id, "text/plain")
+    
+    # Copy validation prompt file if exists
+    new_validation_prompt_file_id = None
+    new_validation_prompt_path = None
+    if src_validation_prompt_file_id:
+        src_vp_path = get_file_internal_path(src_validation_prompt_file_id)
+        if src_vp_path and os.path.isfile(src_vp_path):
+            vp_filename = secure_filename(os.path.basename(src_vp_path))
+            new_validation_prompt_path = os.path.join(run_upload_dir, vp_filename)
+            shutil.copy2(src_vp_path, new_validation_prompt_path)
+            new_validation_prompt_file_id = register_file(new_validation_prompt_path, vp_filename, "validation_prompt", new_run_id, "text/plain")
 
     if source_type == "pdf":
         if not src_pdfs_dir or not os.path.isdir(src_pdfs_dir):
@@ -3171,7 +3677,7 @@ def retry_run(run_id):
         new_zip_file_id = None
         new_zip_path = None
         if src_zip_file_id:
-            src_zip_path = get_file_path(src_zip_file_id)
+            src_zip_path = get_file_internal_path(src_zip_file_id)
             if src_zip_path and os.path.isfile(src_zip_path):
                 zip_filename = secure_filename(os.path.basename(src_zip_path))
                 new_zip_path = os.path.join(run_upload_dir, zip_filename)
@@ -3209,16 +3715,21 @@ def retry_run(run_id):
             conn.close()
             return jsonify({"error": "No PDF files found to retry"}), 400
 
+        # Register individual PDFs
         for pdf_file in os.listdir(pdfs_dir):
             if pdf_file.lower().endswith(".pdf"):
                 register_file(os.path.join(pdfs_dir, pdf_file), pdf_file, "pdf", new_run_id, "application/pdf")
+
+        # Create meta source for provenance
+        meta_source_id = create_meta_source(run_id=new_run_id, method="retry", user_id=user_id, name=name)
 
         cur.execute(
             """
             INSERT INTO runs (id, name, source_type, status, start_date, llm_provider, pdfs_dir, excel_path, output_dir,
                               prompt, search_methods, search_queries, links, table_file_url, per_link_prompt,
-                              sources_count, schema_file_id, zip_file_id, enable_row_counting, user_id)
-            VALUES (?, ?, 'pdf', 'waiting', ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '', '', ?, ?, ?, ?, ?)
+                              sources_count, schema_file_id, zip_file_id, enable_row_counting, user_id, meta_source_id,
+                              extraction_prompt_file_id, validation_prompt_file_id, validation_enabled, validation_max_retries, cache_flags)
+            VALUES (?, ?, 'pdf', 'waiting', ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 new_run_id,
@@ -3234,14 +3745,56 @@ def retry_run(run_id):
                 new_zip_file_id,
                 enable_row_counting,
                 user_id,
+                meta_source_id,
+                new_extraction_prompt_file_id,
+                new_validation_prompt_file_id,
+                validation_enabled,
+                validation_max_retries,
+                src_cache_flags,
             ),
         )
+
+        # Insert source rows for each PDF file (same pattern as create_run)
+        cur.execute(
+            "SELECT id, original_name, filename FROM files WHERE run_id = ? AND file_type IN ('pdf','crawled_pdf')",
+            (new_run_id,),
+        )
+        for f in cur.fetchall():
+            pdf_file_id = f["id"]
+            title = f["original_name"] or f["filename"]
+            ensure_source_row(
+                source_id=pdf_file_id,
+                run_id=new_run_id,
+                source_type="pdf",
+                status="PENDING",
+                url=None,
+                title=title,
+                crawl_job_id=None,
+                pdf_file_id=pdf_file_id,
+                meta_source_id=meta_source_id,
+                cur=cur,
+            )
+
         conn.commit()
         conn.close()
 
         log_message(f"Run retried from {run_id}: {name}", "INFO", new_run_id)
 
+        # Start background conversion for PDF sources so they transition to READY
+        try:
+            threading.Thread(target=process_pdf_sources_for_run, args=(new_run_id, user_id), daemon=True).start()
+        except Exception:
+            pass
+
         if auto_start:
+            # Parse cache flags from source run
+            cache_flags_dict = None
+            if src_cache_flags:
+                try:
+                    cache_flags_dict = json.loads(src_cache_flags) if isinstance(src_cache_flags, str) else src_cache_flags
+                except Exception:
+                    pass
+            
             spawn_extraction_process(
                 run_id=new_run_id,
                 pdfs_dir=pdfs_dir,
@@ -3251,6 +3804,10 @@ def retry_run(run_id):
                 llm_provider=llm_provider,
                 enable_row_counting=bool(enable_row_counting),
                 user_id=user_id,
+                validation_prompt_path=new_validation_prompt_path,
+                validation_enabled=bool(validation_enabled),
+                validation_max_retries=validation_max_retries,
+                cache_flags=cache_flags_dict,
             )
 
         return jsonify(
@@ -3269,6 +3826,8 @@ def retry_run(run_id):
                 "schemaFileId": schema_file_id,
                 "zipFileId": new_zip_file_id,
                 "enableRowCounting": bool(enable_row_counting),
+                "validationEnabled": bool(validation_enabled),
+                "validationMaxRetries": validation_max_retries,
             }
         ), 201
 
@@ -3286,10 +3845,12 @@ def retry_run(run_id):
         cur.execute(
             """
             INSERT INTO runs (id, name, source_type, status, start_date, llm_provider, excel_path, output_dir,
-                              prompt, links, schema_file_id, sources_count, user_id)
-            VALUES (?, ?, 'links', 'crawling', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              prompt, links, schema_file_id, sources_count, user_id,
+                              extraction_prompt_file_id, validation_prompt_file_id, validation_enabled, validation_max_retries, cache_flags)
+            VALUES (?, ?, 'links', 'crawling', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (new_run_id, name, now, llm_provider, new_excel_path, output_dir, prompt, json.dumps(links), schema_file_id, len(links), user_id),
+            (new_run_id, name, now, llm_provider, new_excel_path, output_dir, prompt, json.dumps(links), schema_file_id, len(links), user_id,
+             new_extraction_prompt_file_id, new_validation_prompt_file_id, validation_enabled, validation_max_retries, src_cache_flags),
         )
         conn.commit()
 
@@ -3340,6 +3901,8 @@ def retry_run(run_id):
                 "llmProvider": llm_provider,
                 "prompt": prompt,
                 "schemaFileId": schema_file_id,
+                "validationEnabled": bool(validation_enabled),
+                "validationMaxRetries": validation_max_retries,
             }
         ), 201
 
@@ -3356,10 +3919,12 @@ def retry_run(run_id):
         cur.execute(
             """
             INSERT INTO runs (id, name, source_type, status, start_date, llm_provider, excel_path, output_dir,
-                              prompt, deep_research_query, schema_file_id, sources_count, user_id)
-            VALUES (?, ?, 'deep_research', 'searching', ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                              prompt, deep_research_query, schema_file_id, sources_count, user_id,
+                              extraction_prompt_file_id, validation_prompt_file_id, validation_enabled, validation_max_retries, cache_flags)
+            VALUES (?, ?, 'deep_research', 'searching', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
             """,
-            (new_run_id, name, now, llm_provider, new_excel_path, output_dir, prompt, query, schema_file_id, user_id),
+            (new_run_id, name, now, llm_provider, new_excel_path, output_dir, prompt, query, schema_file_id, user_id,
+             new_extraction_prompt_file_id, new_validation_prompt_file_id, validation_enabled, validation_max_retries, src_cache_flags),
         )
         conn.commit()
         conn.close()
@@ -3511,6 +4076,8 @@ def retry_run(run_id):
                 "prompt": prompt,
                 "schemaFileId": schema_file_id,
                 "deepResearchQuery": query,
+                "validationEnabled": bool(validation_enabled),
+                "validationMaxRetries": validation_max_retries,
             }
         ), 201
 
@@ -3550,7 +4117,10 @@ def get_run_data(run_id):
     """Get extracted data (global_data.json) for a run.
     
     Returns the actual extracted JSON data. NO PATHS EXPOSED.
+    Missing values are normalized to null for backward compatibility.
     """
+    from missing_utils import normalize_data_list
+    
     page = int(request.args.get("page", 1))
     page_size = int(request.args.get("pageSize", 100))
     sort = request.args.get("sort")
@@ -3594,6 +4164,9 @@ def get_run_data(run_id):
         # Ensure data is a list
         if not isinstance(data, list):
             data = [data] if data else []
+        
+        # Normalize data - convert all missing indicators to null (backward compatibility)
+        data = normalize_data_list(data)
 
         fields = set()
         for item in data:
@@ -3681,26 +4254,9 @@ def get_run_inspection(run_id):
             "perField": {},
         })
 
+    from missing_utils import is_missing
     def _is_applicable(v):
-        if v is None:
-            return False
-        if isinstance(v, bool):
-            return True
-        if isinstance(v, (int, float)):
-            return True
-        if isinstance(v, (list, tuple, dict)):
-            return len(v) > 0
-        try:
-            s = str(v)
-        except Exception:
-            return False
-        s = s.strip()
-        if not s:
-            return False
-        norm = s.replace(".", "").replace(" ", "").replace("_", "").replace("-", "").lower()
-        if norm in {"na", "n/a", "none", "null"}:
-            return False
-        return True
+        return not is_missing(v)
 
     try:
         with open(global_json_path, "r", encoding="utf-8") as f:
@@ -3751,15 +4307,66 @@ def get_run_inspection(run_id):
         return jsonify({"error": f"Failed to read output file: {e}"}), 500
 
 
+def _humanize_constraint(python_expr: str) -> str:
+    """Convert pandas python_expression to human-readable constraint."""
+    if not python_expr:
+        return ""
+    
+    # Replace common pandas patterns with readable text
+    result = python_expr
+    
+    # Replace df['column'] with just column name
+    result = re.sub(r"df\['([^']+)'\]", r"\1", result)
+    result = re.sub(r'df\["([^"]+)"\]', r"\1", result)
+    
+    # Replace pd.to_numeric(..., errors='coerce') with "numeric value of"
+    result = re.sub(r"pd\.to_numeric\(([^,]+),\s*errors='coerce'\)", r"(numeric) \1", result)
+    
+    # Replace .between(a, b) with "between a and b"
+    result = re.sub(r"\.between\(([^,]+),\s*([^)]+)\)", r" is between \1 and \2", result)
+    
+    # Replace .fillna(0) with cleaner text
+    result = re.sub(r"\.fillna\(0\)", "", result)
+    
+    # Replace .notna() with "is not empty"
+    result = re.sub(r"\.notna\(\)", " is not empty", result)
+    
+    # Replace .isna() with "is empty"
+    result = re.sub(r"\.isna\(\)", " is empty", result)
+    
+    # Replace .str.contains(...) with "contains"
+    result = re.sub(r"\.str\.contains\('([^']+)'[^)]*\)", r" contains '\1'", result)
+    
+    # Replace >= 0 with ">= 0"
+    result = re.sub(r"\s*>=\s*0", " >= 0", result)
+    
+    # Replace > 0 with "> 0"  
+    result = re.sub(r"\s*>\s*0", " > 0", result)
+    
+    # Replace != '' with "is not empty"
+    result = re.sub(r"\s*!=\s*''", " is not empty", result)
+    
+    # Replace & with "AND"
+    result = re.sub(r"\s*&\s*", " AND ", result)
+    
+    # Replace | with "OR"
+    result = re.sub(r"\s*\|\s*", " OR ", result)
+    
+    # Clean up extra whitespace
+    result = re.sub(r"\s+", " ", result).strip()
+    
+    return result
+
+
 @app.route("/runs/<run_id>/validation", methods=["GET"])
 def get_run_validation(run_id):
     """Get validation results for a run.
     
-    Returns validation report, rules summary, and row flags.
+    Returns validation report, rules summary, row flags, and validation prompt.
     """
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT output_dir, validation_enabled, validation_pass_rate, validation_accepted_count, validation_rejected_count FROM runs WHERE id = ?", (run_id,))
+    cur.execute("SELECT output_dir, validation_enabled, validation_pass_rate, validation_accepted_count, validation_rejected_count, validation_prompt_file_id FROM runs WHERE id = ?", (run_id,))
     row = cur.fetchone()
     conn.close()
 
@@ -3780,9 +4387,23 @@ def get_run_validation(run_id):
     row_flags_path = os.path.join(validation_dir, "row_flags.csv")
 
     if not os.path.exists(validation_report_path):
+        # Still return validation prompt if it exists, even without results
+        validation_prompt = None
+        validation_prompt_file_id = row["validation_prompt_file_id"]
+        if validation_prompt_file_id:
+            prompt_path = get_file_internal_path(validation_prompt_file_id)
+            if prompt_path and os.path.isfile(prompt_path):
+                try:
+                    with open(prompt_path, "r", encoding="utf-8") as f:
+                        validation_prompt = f.read()
+                except Exception:
+                    pass
+        
         return jsonify({
             "exists": False,
-            "message": "Validation report not found. Run may still be in progress."
+            "message": "Validation report not found. Run may still be in progress.",
+            "validationPrompt": validation_prompt,
+            "validationEnabled": True
         })
 
     try:
@@ -3804,16 +4425,52 @@ def get_run_validation(run_id):
                 reader = csv.DictReader(f)
                 row_flags = list(reader)
 
-        # Build rules summary
+        # Build rules summary with human-readable constraints
         rules_summary = []
-        for result in report.get("all_results", []):
+        
+        # Create a lookup from generated config for rule details
+        config_rules_lookup = {}
+        if generated_config and "rules" in generated_config:
+            for rule in generated_config["rules"]:
+                config_rules_lookup[rule.get("rule_id")] = rule
+        
+        for result in report.get("validation_results", []):
+            rule_id = result.get("rule_id")
+            config_rule = config_rules_lookup.get(rule_id, {})
+            
+            # Convert python_expression to human-readable constraint
+            python_expr = config_rule.get("python_expression", "")
+            constraint = _humanize_constraint(python_expr) if python_expr else None
+            
+            severity = result.get("severity") or config_rule.get("severity", "warning")
+            raw_passed = result.get("passed", False)
+            # Only errors count as true failures; warnings always "pass" for acceptance purposes
+            effective_passed = raw_passed if severity == "error" else True
+            
             rules_summary.append({
-                "ruleId": result.get("rule_id"),
-                "name": result.get("message", "").split(":")[0] if result.get("message") else "",
-                "passed": result.get("passed", False),
-                "severity": result.get("severity"),
-                "details": result.get("details", {})
+                "ruleId": rule_id,
+                "name": config_rule.get("name") or (result.get("message", "").split(":")[0] if result.get("message") else ""),
+                "description": config_rule.get("description"),
+                "columns": config_rule.get("columns", []),
+                "constraint": constraint,
+                "passed": effective_passed,  # Only errors can fail
+                "rawPassed": raw_passed,  # Original pass/fail for display
+                "severity": severity,
+                "details": result.get("details", {}),
+                "affectedRows": result.get("affected_rows", [])
             })
+
+        # Load validation prompt if exists
+        validation_prompt = None
+        validation_prompt_file_id = row["validation_prompt_file_id"]
+        if validation_prompt_file_id:
+            prompt_path = get_file_internal_path(validation_prompt_file_id)
+            if prompt_path and os.path.isfile(prompt_path):
+                try:
+                    with open(prompt_path, "r", encoding="utf-8") as f:
+                        validation_prompt = f.read()
+                except Exception:
+                    pass
 
         return jsonify({
             "exists": True,
@@ -3828,7 +4485,8 @@ def get_run_validation(run_id):
             "rules": rules_summary,
             "generatedConfig": generated_config,
             "rowFlags": row_flags[:100],  # Limit to first 100 rows for performance
-            "rowFlagsTotal": len(row_flags)
+            "rowFlagsTotal": len(row_flags),
+            "validationPrompt": validation_prompt
         })
     except json.JSONDecodeError as e:
         return jsonify({"error": f"Invalid JSON in validation report: {e}"}), 500
@@ -3836,12 +4494,556 @@ def get_run_validation(run_id):
         return jsonify({"error": f"Failed to read validation results: {e}"}), 500
 
 
+@app.route("/runs/<run_id>/validation/report", methods=["GET"])
+def download_validation_report(run_id):
+    """Download validation report as PDF or Excel file.
+    
+    Query params:
+        format: 'pdf' (default) or 'excel'
+    """
+    from openpyxl import Workbook
+    import io
+    import csv
+    import tempfile
+    
+    report_format = request.args.get("format", "pdf").lower()
+    
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM runs WHERE id = ?", (run_id,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "Run not found"}), 404
+
+    run_data = dict(row)
+    output_dir = run_data.get("output_dir")
+    run_name = run_data.get("name") or run_id[:8]
+    
+    if not output_dir or not run_data.get("validation_enabled"):
+        return jsonify({"error": "Validation not enabled for this run"}), 400
+
+    validation_dir = os.path.join(output_dir, "validation")
+    validation_report_path = os.path.join(validation_dir, "validation_report.json")
+    validation_config_path = os.path.join(output_dir, "validation_config.json")
+    row_flags_path = os.path.join(validation_dir, "row_flags.csv")
+    validated_data_path = os.path.join(validation_dir, "validated_data.csv")
+    global_data_path = os.path.join(output_dir, "global_data.json")
+    schema_mapping_path = os.path.join(output_dir, "schema_mapping.json")
+
+    if not os.path.exists(validation_report_path):
+        return jsonify({"error": "Validation report not found"}), 404
+
+    try:
+        # Load validation data
+        with open(validation_report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+        
+        generated_config = None
+        if os.path.exists(validation_config_path):
+            with open(validation_config_path, "r", encoding="utf-8") as f:
+                generated_config = json.load(f)
+        
+        # Handle PDF format
+        if report_format == "pdf":
+            from report_generator import generate_validation_report_pdf
+            
+            # Load extracted data
+            extracted_data = []
+            if os.path.exists(global_data_path):
+                with open(global_data_path, "r", encoding="utf-8") as f:
+                    extracted_data = json.load(f)
+                    if not isinstance(extracted_data, list):
+                        extracted_data = [extracted_data] if extracted_data else []
+            
+            # Load schema fields
+            schema_fields = None
+            if os.path.exists(schema_mapping_path):
+                with open(schema_mapping_path, "r", encoding="utf-8") as f:
+                    schema_mapping = json.load(f)
+                    if 'fields' in schema_mapping:
+                        schema_fields = schema_mapping['fields']
+                    elif 'fieldDefs' in schema_mapping:
+                        schema_fields = [f.get('name') for f in schema_mapping['fieldDefs'] if f.get('name')]
+            
+            # Generate PDF
+            safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in run_name)
+            pdf_path = os.path.join(tempfile.gettempdir(), f"validation_report_{safe_name}.pdf")
+            
+            generate_validation_report_pdf(
+                run_data=run_data,
+                extracted_data=extracted_data,
+                validation_report=report,
+                validation_config=generated_config,
+                output_path=pdf_path,
+                schema_fields=schema_fields
+            )
+            
+            return send_file(
+                pdf_path,
+                mimetype="application/pdf",
+                as_attachment=True,
+                download_name=f"validation_report_{safe_name}.pdf"
+            )
+        
+        # Handle Excel format (existing logic)
+        
+        # Create Excel workbook
+        wb = Workbook()
+        
+        # Calculate passed/failed from validation_results
+        validation_results = report.get("validation_results", [])
+        total_rules = len(validation_results)
+        passed_rules = sum(1 for r in validation_results if r.get("passed", False))
+        failed_rules = total_rules - passed_rules
+        # Only count errors as true failures
+        error_failures = sum(1 for r in validation_results if r.get("severity") == "error" and not r.get("passed", False))
+        warning_failures = sum(1 for r in validation_results if r.get("severity") == "warning" and not r.get("passed", False))
+        
+        # Sheet 1: Summary
+        ws_summary = wb.active
+        ws_summary.title = "Summary"
+        summary_data = report.get("summary", {})
+        ws_summary.append(["Validation Report Summary"])
+        ws_summary.append([])
+        ws_summary.append(["Metric", "Value"])
+        ws_summary.append(["Total Rows", report.get("total_rows", 0)])
+        ws_summary.append(["Overall Pass Rate", f"{summary_data.get('overall_pass_rate', 0) * 100:.1f}%"])
+        ws_summary.append(["Total Rules", total_rules])
+        ws_summary.append(["Passed Rules", passed_rules])
+        ws_summary.append(["Failed Rules (Errors)", error_failures])
+        ws_summary.append(["Warnings", warning_failures])
+        
+        # Sheet 2: Rules by Severity (Errors vs Warnings)
+        ws_rules = wb.create_sheet("Rules Summary")
+        ws_rules.append(["Rule ID", "Name", "Severity", "Status", "Affected Rows", "Description", "Columns", "Constraint"])
+        
+        config_rules_lookup = {}
+        if generated_config and "rules" in generated_config:
+            for rule in generated_config["rules"]:
+                config_rules_lookup[rule.get("rule_id")] = rule
+        
+        for result in report.get("validation_results", []):
+            rule_id = result.get("rule_id")
+            config_rule = config_rules_lookup.get(rule_id, {})
+            severity = result.get("severity", "warning")
+            raw_passed = result.get("passed", False)
+            # Only errors count as FAIL
+            status = "PASS" if raw_passed else ("FAIL" if severity == "error" else "WARN")
+            affected_count = len(result.get("affected_rows", []))
+            
+            ws_rules.append([
+                rule_id,
+                config_rule.get("name", ""),
+                severity.upper(),
+                status,
+                affected_count,
+                config_rule.get("description", ""),
+                ", ".join(config_rule.get("columns", [])),
+                _humanize_constraint(config_rule.get("python_expression", ""))
+            ])
+        
+        # Sheet 3: Constraints by Column
+        ws_columns = wb.create_sheet("By Column")
+        ws_columns.append(["Column", "Total Rules", "Errors Failed", "Warnings", "Status", "Rule IDs"])
+        
+        column_to_rules = {}
+        for result in report.get("validation_results", []):
+            rule_id = result.get("rule_id")
+            config_rule = config_rules_lookup.get(rule_id, {})
+            for col in config_rule.get("columns", []):
+                if col not in column_to_rules:
+                    column_to_rules[col] = []
+                column_to_rules[col].append({
+                    "rule_id": rule_id,
+                    "severity": result.get("severity", "warning"),
+                    "passed": result.get("passed", False)
+                })
+        
+        for col in sorted(column_to_rules.keys()):
+            rules = column_to_rules[col]
+            error_fails = sum(1 for r in rules if r["severity"] == "error" and not r["passed"])
+            warnings = sum(1 for r in rules if r["severity"] == "warning" and not r["passed"])
+            status = "FAIL" if error_fails > 0 else ("WARN" if warnings > 0 else "PASS")
+            rule_ids = ", ".join(r["rule_id"] for r in rules)
+            ws_columns.append([col, len(rules), error_fails, warnings, status, rule_ids])
+        
+        # Sheet 4: Row Flags with Success Rate
+        if os.path.exists(row_flags_path):
+            ws_rows = wb.create_sheet("Row Flags")
+            import csv
+            with open(row_flags_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                rows_data = list(reader)
+            
+            if rows_data:
+                # Get flag columns (boolean-like)
+                flag_cols = [k for k in rows_data[0].keys() if k != "row_index"]
+                headers = ["Row", "Passed", "Failed", "Success Rate"] + flag_cols
+                ws_rows.append(headers)
+                
+                for row_data in rows_data:
+                    row_idx = row_data.get("row_index", "")
+                    passed = sum(1 for k in flag_cols if str(row_data.get(k, "")).lower() in ("true", "1"))
+                    failed = sum(1 for k in flag_cols if str(row_data.get(k, "")).lower() in ("false", "0"))
+                    total = passed + failed
+                    success_rate = f"{(passed / total * 100):.1f}%" if total > 0 else "N/A"
+                    
+                    row_values = [row_idx, passed, failed, success_rate]
+                    for k in flag_cols:
+                        val = row_data.get(k, "")
+                        if str(val).lower() == "true":
+                            row_values.append("✓")
+                        elif str(val).lower() == "false":
+                            row_values.append("✗")
+                        else:
+                            row_values.append(val)
+                    ws_rows.append(row_values)
+        
+        # Sheet 5: Validated Data
+        if os.path.exists(validated_data_path):
+            ws_validated = wb.create_sheet("Validated Data")
+            import csv
+            with open(validated_data_path, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                for row_data in reader:
+                    ws_validated.append(row_data)
+        
+        # Save to BytesIO
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in run_name)
+        filename = f"validation_report_{safe_name}.xlsx"
+        
+        return send_file(
+            output,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate validation report: {e}"}), 500
+
+
+@app.route("/runs/<run_id>/validation/upload", methods=["POST"])
+@require_auth
+def upload_validation_prompt(run_id):
+    """Upload a validation prompt for an existing run (post-extraction).
+    
+    This allows enabling validation after extraction has completed.
+    """
+    user_id = g.current_user["id"]
+    
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, user_id, output_dir, status FROM runs WHERE id = ?", (run_id,))
+    row = cur.fetchone()
+    
+    if not row:
+        conn.close()
+        return jsonify({"error": "Run not found"}), 404
+    
+    if row["user_id"] != user_id:
+        conn.close()
+        return jsonify({"error": "Forbidden"}), 403
+    
+    output_dir = row["output_dir"]
+    
+    # Check if validation prompt file is provided
+    if "validationPrompt" not in request.files:
+        conn.close()
+        return jsonify({"error": "No validation prompt file provided"}), 400
+    
+    val_prompt_file = request.files["validationPrompt"]
+    if not val_prompt_file.filename or not val_prompt_file.filename.lower().endswith('.txt'):
+        conn.close()
+        return jsonify({"error": "Validation prompt must be a .txt file"}), 400
+    
+    # Save validation prompt file
+    run_upload_dir = os.path.join(UPLOAD_FOLDER, run_id)
+    os.makedirs(run_upload_dir, exist_ok=True)
+    
+    val_prompt_filename = secure_filename(val_prompt_file.filename)
+    validation_prompt_path = os.path.join(run_upload_dir, f"validation_prompt_{val_prompt_filename}")
+    val_prompt_file.save(validation_prompt_path)
+    
+    # Register file
+    validation_prompt_file_id = register_file(validation_prompt_path, val_prompt_file.filename, "validation_prompt", run_id, "text/plain")
+    
+    # Get optional max retries from form data
+    validation_max_retries = int(request.form.get("validationMaxRetries", 3))
+    
+    # Update run with validation settings
+    cur.execute("""
+        UPDATE runs 
+        SET validation_prompt_file_id = ?, validation_enabled = 1, validation_max_retries = ?
+        WHERE id = ?
+    """, (validation_prompt_file_id, validation_max_retries, run_id))
+    conn.commit()
+    conn.close()
+    
+    log_message(f"Validation prompt uploaded: {val_prompt_file.filename}", "INFO", run_id)
+    
+    return jsonify({
+        "success": True,
+        "message": "Validation prompt uploaded successfully",
+        "validationPromptFileId": validation_prompt_file_id,
+        "validationEnabled": True,
+        "validationMaxRetries": validation_max_retries
+    })
+
+
+@app.route("/runs/<run_id>/validation/run", methods=["POST"])
+@require_auth
+def run_validation_only(run_id):
+    """Run validation on extracted data without re-extracting.
+    
+    This spawns extract.py with --validation-only flag, which:
+    - Skips extraction phase
+    - Loads existing global_data.json
+    - Generates validation config from the uploaded prompt
+    - Runs validation and saves results
+    - Appends logs to existing IPC logs (visible in Logs tab)
+    """
+    user_id = g.current_user["id"]
+    
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, user_id, output_dir, pdfs_dir, status, validation_prompt_file_id, 
+               validation_enabled, validation_max_retries, schema_file_id,
+               cache_surya_read, cache_surya_write, cache_llm_read, cache_llm_write,
+               cache_schema_read, cache_schema_write, cache_validation_read, cache_validation_write
+        FROM runs WHERE id = ?
+    """, (run_id,))
+    row = cur.fetchone()
+    
+    if not row:
+        conn.close()
+        return jsonify({"error": "Run not found"}), 404
+    
+    if row["user_id"] != user_id:
+        conn.close()
+        return jsonify({"error": "Forbidden"}), 403
+    
+    output_dir = row["output_dir"]
+    pdfs_dir = row["pdfs_dir"]
+    validation_prompt_file_id = row["validation_prompt_file_id"]
+    schema_file_id = row["schema_file_id"]
+    
+    # Check if validation prompt exists
+    if not validation_prompt_file_id:
+        conn.close()
+        return jsonify({"error": "No validation prompt uploaded. Upload one first via /validation/upload"}), 400
+    
+    # Get validation prompt path
+    validation_prompt_path = get_file_internal_path(validation_prompt_file_id)
+    if not validation_prompt_path or not os.path.isfile(validation_prompt_path):
+        conn.close()
+        return jsonify({"error": "Validation prompt file not found"}), 400
+    
+    # Get schema file path
+    excel_path = get_file_internal_path(schema_file_id) if schema_file_id else None
+    if not excel_path or not os.path.isfile(excel_path):
+        conn.close()
+        return jsonify({"error": "Schema file not found"}), 400
+    
+    # Check if extracted data exists
+    global_json_path = os.path.join(output_dir, "global_data.json")
+    if not os.path.isfile(global_json_path):
+        conn.close()
+        return jsonify({"error": "No extracted data found. Run extraction first."}), 400
+    
+    # Build cache flags from run settings
+    cache_flags = {
+        "surya_read": row["cache_surya_read"] if row["cache_surya_read"] is not None else True,
+        "surya_write": row["cache_surya_write"] if row["cache_surya_write"] is not None else True,
+        "llm_read": row["cache_llm_read"] if row["cache_llm_read"] is not None else True,
+        "llm_write": row["cache_llm_write"] if row["cache_llm_write"] is not None else True,
+        "schema_read": row["cache_schema_read"] if row["cache_schema_read"] is not None else True,
+        "schema_write": row["cache_schema_write"] if row["cache_schema_write"] is not None else True,
+        "validation_read": row["cache_validation_read"] if row["cache_validation_read"] is not None else True,
+        "validation_write": row["cache_validation_write"] if row["cache_validation_write"] is not None else True,
+    }
+    
+    conn.close()
+    
+    # Spawn validation-only process (uses extract.py with --validation-only flag)
+    spawn_validation_only_process(
+        run_id=run_id,
+        pdfs_dir=pdfs_dir,
+        excel_path=excel_path,
+        output_dir=output_dir,
+        validation_prompt_path=validation_prompt_path,
+        user_id=user_id,
+        cache_flags=cache_flags
+    )
+    
+    log_message("Validation-only process started", "INFO", run_id)
+    
+    return jsonify({
+        "success": True,
+        "message": "Validation started. Check the Logs tab for progress and Validation tab for results.",
+        "runId": run_id
+    })
+
+
+@app.route("/runs/<run_id>/validation/rerun", methods=["POST"])
+@require_auth
+def rerun_validation_logic(run_id):
+    """Re-run validation logic using existing validation_config.json.
+    
+    This does NOT regenerate the config from LLM - it only re-applies
+    the existing validation rules to the extracted data.
+    Useful after fixing validation engine bugs or tweaking config manually.
+    """
+    user_id = g.current_user["id"]
+    
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, user_id, output_dir, validation_enabled FROM runs WHERE id = ?", (run_id,))
+    row = cur.fetchone()
+    
+    if not row:
+        conn.close()
+        return jsonify({"error": "Run not found"}), 404
+    
+    if row["user_id"] != user_id:
+        conn.close()
+        return jsonify({"error": "Forbidden"}), 403
+    
+    output_dir = row["output_dir"]
+    conn.close()
+    
+    if not output_dir:
+        return jsonify({"error": "Run has no output directory"}), 400
+    
+    # Check required files exist
+    global_json_path = os.path.join(output_dir, "global_data.json")
+    validation_config_path = os.path.join(output_dir, "validation_config.json")
+    
+    if not os.path.isfile(global_json_path):
+        return jsonify({"error": "No extracted data found (global_data.json missing)"}), 400
+    
+    if not os.path.isfile(validation_config_path):
+        return jsonify({"error": "No validation config found. Run validation first to generate config."}), 400
+    
+    try:
+        # Load extracted data
+        with open(global_json_path, "r", encoding="utf-8") as f:
+            extracted_data = json.load(f)
+        
+        if not isinstance(extracted_data, list):
+            extracted_data = [extracted_data] if extracted_data else []
+        
+        # Load validation config
+        with open(validation_config_path, "r", encoding="utf-8") as f:
+            validation_config = json.load(f)
+        
+        # Import validation modules
+        import pandas as pd
+        from validation.rule_types import ValidationConfig, RuleDefinition, RuleScope, RuleSeverity
+        from validation.rule_engine import RuleEngine
+        
+        # Convert config to ValidationConfig object
+        rules = []
+        for rule_dict in validation_config.get("rules", []):
+            rules.append(RuleDefinition(
+                rule_id=rule_dict.get("rule_id", ""),
+                name=rule_dict.get("name", ""),
+                description=rule_dict.get("description", ""),
+                scope=RuleScope(rule_dict.get("scope", "row")),
+                severity=RuleSeverity(rule_dict.get("severity", "warning")),
+                columns=rule_dict.get("columns", []),
+                python_expression=rule_dict.get("python_expression"),
+                enabled=rule_dict.get("enabled", True),
+                filter_condition=rule_dict.get("filter_condition"),
+                flag_column=rule_dict.get("flag_column")
+            ))
+        
+        config = ValidationConfig(
+            name=validation_config.get("name", "Validation"),
+            description=validation_config.get("description", ""),
+            rules=rules,
+            filter_condition=validation_config.get("filter_condition"),
+            paper_group_column=validation_config.get("paper_group_column")
+        )
+        
+        # Create DataFrame and run validation
+        df = pd.DataFrame(extracted_data)
+        engine = RuleEngine(config)
+        report = engine.validate(df)
+        
+        # Save validation results
+        validation_dir = os.path.join(output_dir, "validation")
+        os.makedirs(validation_dir, exist_ok=True)
+        
+        # Save report
+        report_dict = report.to_dict()
+        with open(os.path.join(validation_dir, "validation_report.json"), "w", encoding="utf-8") as f:
+            json.dump(report_dict, f, indent=2, default=str)
+        
+        # Save row flags as CSV
+        if report.row_results:
+            row_flags_df = pd.DataFrame(report.row_results)
+            row_flags_df.insert(0, "row_index", range(len(row_flags_df)))
+            row_flags_df.to_csv(os.path.join(validation_dir, "row_flags.csv"), index=False)
+        
+        # Save validated data (rows that pass all error-severity rules)
+        error_rules = [r for r in report.all_results if r.severity == RuleSeverity.ERROR]
+        if error_rules:
+            failed_rows = set()
+            for r in error_rules:
+                if not r.passed:
+                    failed_rows.update(r.affected_rows)
+            accepted_data = [row for i, row in enumerate(extracted_data) if i not in failed_rows]
+        else:
+            accepted_data = extracted_data
+        
+        with open(os.path.join(validation_dir, "validated_data.json"), "w", encoding="utf-8") as f:
+            json.dump(accepted_data, f, indent=2, default=str)
+        
+        validated_df = pd.DataFrame(accepted_data)
+        validated_df.to_csv(os.path.join(validation_dir, "validated_data.csv"), index=False)
+        
+        # Generate summary
+        summary_lines = [
+            f"Validation Re-run Complete",
+            f"Total rows: {len(extracted_data)}",
+            f"Accepted rows: {len(accepted_data)}",
+            f"Rejected rows: {len(extracted_data) - len(accepted_data)}",
+            f"Pass rate: {report.summary.get('overall_pass_rate', 0):.1%}"
+        ]
+        with open(os.path.join(validation_dir, "validation_summary.txt"), "w", encoding="utf-8") as f:
+            f.write("\n".join(summary_lines))
+        
+        log_message(f"Validation re-run complete: {len(accepted_data)}/{len(extracted_data)} rows accepted", "INFO", run_id)
+        
+        return jsonify({
+            "success": True,
+            "message": f"Validation re-run complete. {len(accepted_data)}/{len(extracted_data)} rows accepted.",
+            "totalRows": len(extracted_data),
+            "acceptedRows": len(accepted_data),
+            "passRate": report.summary.get("overall_pass_rate", 0)
+        })
+        
+    except Exception as e:
+        log_message(f"Validation re-run failed: {e}", "ERROR", run_id)
+        return jsonify({"error": f"Validation re-run failed: {e}"}), 500
+
+
 @app.route("/runs/<run_id>/validated-data", methods=["GET"])
 def get_run_validated_data(run_id):
     """Get validated/filtered data (validated_data.json) for a run.
     
     Returns only the rows that passed validation (accepted rows).
+    Missing values are normalized to null for backward compatibility.
     """
+    from missing_utils import normalize_data_list
+    
     page = int(request.args.get("page", 1))
     page_size = int(request.args.get("pageSize", 100))
 
@@ -3884,6 +5086,9 @@ def get_run_validated_data(run_id):
 
         if not isinstance(data, list):
             data = [data] if data else []
+        
+        # Normalize data - convert all missing indicators to null (backward compatibility)
+        data = normalize_data_list(data)
 
         fields = set()
         for item in data:
@@ -3950,9 +5155,14 @@ def download_run_data(run_id):
     
     Query params:
         format: json | csv | excel (default: json)
+    
+    Note: Missing values are normalized:
+        - JSON: null
+        - CSV/Excel: N/A
     """
     import csv
     import io
+    from missing_utils import normalize_data_list, is_missing
     
     format_type = request.args.get("format", "json").lower()
     
@@ -3986,6 +5196,9 @@ def download_run_data(run_id):
         if not data:
             return jsonify({"error": "Extracted data is empty"}), 404
         
+        # Normalize data - convert all missing indicators to null (backward compatibility)
+        data = normalize_data_list(data)
+        
         # Generate filename
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in run_name)
         
@@ -4005,11 +5218,18 @@ def download_run_data(run_id):
                 all_keys.update(entry.keys())
             all_keys = sorted(all_keys)
             
+            # Convert null values to 'N/A' for CSV export
+            def format_csv_value(v):
+                if v is None:
+                    return "N/A"
+                return v
+            
             output = io.StringIO()
             writer = csv.DictWriter(output, fieldnames=all_keys, extrasaction='ignore')
             writer.writeheader()
             for entry in data:
-                writer.writerow(entry)
+                formatted_entry = {k: format_csv_value(v) for k, v in entry.items()}
+                writer.writerow(formatted_entry)
             
             response = app.response_class(
                 response=output.getvalue(),
@@ -4024,6 +5244,8 @@ def download_run_data(run_id):
                 import pandas as pd
                 
                 df = pd.DataFrame(data)
+                # Replace None/NaN with 'N/A' for Excel export
+                df = df.fillna("N/A")
                 excel_buffer = io.BytesIO()
                 df.to_excel(excel_buffer, index=False, engine='openpyxl')
                 excel_buffer.seek(0)
@@ -4148,12 +5370,15 @@ def export_run_pdf(run_id):
 @app.route("/runs/<run_id>/export-zip", methods=["POST"])
 @optional_auth
 def export_run_zip(run_id):
-    """Export complete run package as ZIP file.
+    """Export COMPLETE run package as ZIP file with ALL related data.
     
-    Includes:
-    - All files from run output directory (PDFs, data files, schemas, etc.)
-    - Excel workbook with run metadata and related DB objects (sources, logs, etc.)
+    Includes EVERYTHING:
+    - All files from run output directory (data files, schemas, validation, etc.)
+    - All files from run uploads directory (PDFs, schema Excel, prompts, etc.)
+    - All IPC logs (extraction.log, stdout.log, stderr.log)
+    - Excel workbook with ALL database records (run, sources, logs, files, crawl_jobs, etc.)
     - Generated PDF report
+    - JSON dumps of all database records
     """
     import zipfile
     import io
@@ -4164,14 +5389,10 @@ def export_run_zip(run_id):
     except ImportError:
         return jsonify({"error": "openpyxl not installed. Run: pip install openpyxl"}), 500
     
-    # Get run data
+    # Get FULL run data (all columns)
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("""
-        SELECT id, name, status, source_type, sources_count, data_entries_count,
-               llm_provider, start_date, output_dir, validation_enabled
-        FROM runs WHERE id = ?
-    """, (run_id,))
+    cur.execute("SELECT * FROM runs WHERE id = ?", (run_id,))
     row = cur.fetchone()
     
     if not row:
@@ -4181,56 +5402,90 @@ def export_run_zip(run_id):
     run_data = dict(row)
     output_dir = run_data.get('output_dir')
     run_name = run_data.get('name', 'run').replace(' ', '_')[:30]
+    pdfs_dir = run_data.get('pdfs_dir')
     
     if not output_dir or not os.path.isdir(output_dir):
         conn.close()
         return jsonify({"error": "Run output directory not found"}), 404
     
-    # Get related objects from DB
-    # Sources
-    cur.execute("""
-        SELECT id, url, domain, title, source_type, status, error,
-               content_type, created_at, updated_at
-        FROM sources WHERE run_id = ?
-    """, (run_id,))
+    # Get ALL related objects from DB
+    # Sources (all columns)
+    cur.execute("SELECT * FROM sources WHERE run_id = ?", (run_id,))
     sources = [dict(r) for r in cur.fetchall()]
     
-    # Logs
-    cur.execute("""
-        SELECT id, created_at, level, message, run_id
-        FROM logs WHERE run_id = ? ORDER BY created_at DESC LIMIT 500
-    """, (run_id,))
+    # Logs (ALL logs, not limited)
+    cur.execute("SELECT * FROM logs WHERE run_id = ? ORDER BY created_at", (run_id,))
     logs = [dict(r) for r in cur.fetchall()]
     
     # Meta sources
-    cur.execute("""
-        SELECT id, method, name, query, config_json, created_at, updated_at
-        FROM meta_sources WHERE run_id = ?
-    """, (run_id,))
+    cur.execute("SELECT * FROM meta_sources WHERE run_id = ?", (run_id,))
     meta_sources = [dict(r) for r in cur.fetchall()]
     
     # Exports
-    cur.execute("""
-        SELECT id, created_at, file_path
-        FROM exports WHERE run_id = ?
-    """, (run_id,))
+    cur.execute("SELECT * FROM exports WHERE run_id = ?", (run_id,))
     exports = [dict(r) for r in cur.fetchall()]
     
+    # Files (all registered files for this run)
+    cur.execute("SELECT * FROM files WHERE run_id = ?", (run_id,))
+    files = [dict(r) for r in cur.fetchall()]
+    
+    # Crawl jobs
+    cur.execute("SELECT * FROM crawl_jobs WHERE run_id = ?", (run_id,))
+    crawl_jobs = [dict(r) for r in cur.fetchall()]
+    
     conn.close()
+    
+    # Paths for additional directories
+    run_upload_dir = os.path.join(UPLOAD_FOLDER, run_id)
+    run_ipc_dir = os.path.join(IPC_DIR, run_id)
     
     # Create ZIP file in memory
     zip_buffer = io.BytesIO()
     
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Add all files from output directory
-        for root, dirs, files in os.walk(output_dir):
-            for file in files:
+        # 1. Add all files from OUTPUT directory (extracted data, validation, etc.)
+        for root, dirs, files_list in os.walk(output_dir):
+            for file in files_list:
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, output_dir)
-                # Put in 'data/' subfolder
-                zf.write(file_path, f"data/{arcname}")
+                zf.write(file_path, f"output/{arcname}")
         
-        # Create Excel workbook with run metadata and related objects
+        # 2. Add all files from UPLOADS directory (PDFs, schema, prompts, etc.)
+        if os.path.isdir(run_upload_dir):
+            for root, dirs, files_list in os.walk(run_upload_dir):
+                for file in files_list:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, run_upload_dir)
+                    zf.write(file_path, f"uploads/{arcname}")
+        
+        # 3. Add all IPC logs (extraction.log, stdout.log, stderr.log)
+        if os.path.isdir(run_ipc_dir):
+            for file in os.listdir(run_ipc_dir):
+                file_path = os.path.join(run_ipc_dir, file)
+                if os.path.isfile(file_path):
+                    zf.write(file_path, f"logs/{file}")
+        
+        # 4. Add JSON dumps of ALL database records for programmatic access
+        db_dump = {
+            "run": run_data,
+            "sources": sources,
+            "logs": logs,
+            "meta_sources": meta_sources,
+            "exports": exports,
+            "files": files,
+            "crawl_jobs": crawl_jobs,
+            "export_timestamp": datetime.now(timezone.utc).isoformat(),
+            "run_id": run_id
+        }
+        zf.writestr("database/full_dump.json", json.dumps(db_dump, indent=2, default=str))
+        zf.writestr("database/run.json", json.dumps(run_data, indent=2, default=str))
+        zf.writestr("database/sources.json", json.dumps(sources, indent=2, default=str))
+        zf.writestr("database/logs.json", json.dumps(logs, indent=2, default=str))
+        zf.writestr("database/meta_sources.json", json.dumps(meta_sources, indent=2, default=str))
+        zf.writestr("database/files.json", json.dumps(files, indent=2, default=str))
+        zf.writestr("database/crawl_jobs.json", json.dumps(crawl_jobs, indent=2, default=str))
+        
+        # 5. Create Excel workbook with run metadata and related objects
         wb = openpyxl.Workbook()
         
         # Sheet 1: Run Overview
@@ -4280,7 +5535,51 @@ def export_run_zip(run_id):
         else:
             ws_exports.append(["No exports found"])
         
-        # Sheet 6: Validated Data
+        # Sheet 6: Files
+        ws_files = wb.create_sheet("Files")
+        if files:
+            headers = list(files[0].keys())
+            ws_files.append(headers)
+            for f in files:
+                ws_files.append([str(f.get(h, '')) for h in headers])
+        else:
+            ws_files.append(["No files found"])
+        
+        # Sheet 7: Crawl Jobs
+        ws_crawl = wb.create_sheet("Crawl Jobs")
+        if crawl_jobs:
+            headers = list(crawl_jobs[0].keys())
+            ws_crawl.append(headers)
+            for cj in crawl_jobs:
+                ws_crawl.append([str(cj.get(h, '')) for h in headers])
+        else:
+            ws_crawl.append(["No crawl jobs found"])
+        
+        # Sheet 8: Extracted Data (global_data.json)
+        ws_extracted = wb.create_sheet("Extracted Data")
+        global_json_path = os.path.join(output_dir, "global_data.json")
+        if os.path.exists(global_json_path):
+            try:
+                with open(global_json_path, "r", encoding="utf-8") as f:
+                    extracted_data = json.load(f)
+                if isinstance(extracted_data, list) and extracted_data:
+                    all_keys = set()
+                    for row in extracted_data:
+                        if isinstance(row, dict):
+                            all_keys.update(row.keys())
+                    headers = sorted(list(all_keys))
+                    ws_extracted.append(headers)
+                    for row in extracted_data:
+                        if isinstance(row, dict):
+                            ws_extracted.append([str(row.get(h, '')) for h in headers])
+                else:
+                    ws_extracted.append(["No extracted data rows found"])
+            except Exception as e:
+                ws_extracted.append([f"Error reading extracted data: {e}"])
+        else:
+            ws_extracted.append(["Extracted data not available"])
+        
+        # Sheet 9: Validated Data
         ws_validated = wb.create_sheet("Validated Data")
         validated_json_path = os.path.join(output_dir, "validated_data.json")
         if os.path.exists(validated_json_path):
@@ -4304,6 +5603,129 @@ def export_run_zip(run_id):
         else:
             ws_validated.append(["Validated data not available (validation may not be enabled or complete)"])
         
+        # Validation Report Sheets (if validation was enabled)
+        validation_dir = os.path.join(output_dir, "validation")
+        validation_report_path = os.path.join(validation_dir, "validation_report.json")
+        validation_config_path = os.path.join(output_dir, "validation_config.json")
+        row_flags_path = os.path.join(validation_dir, "row_flags.csv")
+        
+        if os.path.exists(validation_report_path):
+            try:
+                with open(validation_report_path, "r", encoding="utf-8") as f:
+                    val_report = json.load(f)
+                
+                val_config = None
+                if os.path.exists(validation_config_path):
+                    with open(validation_config_path, "r", encoding="utf-8") as f:
+                        val_config = json.load(f)
+                
+                # Calculate passed/failed from validation_results
+                val_results = val_report.get("validation_results", [])
+                val_total_rules = len(val_results)
+                val_passed_rules = sum(1 for r in val_results if r.get("passed", False))
+                val_error_failures = sum(1 for r in val_results if r.get("severity") == "error" and not r.get("passed", False))
+                val_warning_failures = sum(1 for r in val_results if r.get("severity") == "warning" and not r.get("passed", False))
+                
+                # Sheet 10: Validation Summary
+                ws_val_summary = wb.create_sheet("Validation Summary")
+                val_summary = val_report.get("summary", {})
+                ws_val_summary.append(["Validation Report Summary"])
+                ws_val_summary.append([])
+                ws_val_summary.append(["Metric", "Value"])
+                ws_val_summary.append(["Total Rows", val_report.get("total_rows", 0)])
+                ws_val_summary.append(["Overall Pass Rate", f"{val_summary.get('overall_pass_rate', 0) * 100:.1f}%"])
+                ws_val_summary.append(["Total Rules", val_total_rules])
+                ws_val_summary.append(["Passed Rules", val_passed_rules])
+                ws_val_summary.append(["Failed Rules (Errors)", val_error_failures])
+                ws_val_summary.append(["Warnings", val_warning_failures])
+                
+                # Sheet 11: Validation Rules
+                ws_val_rules = wb.create_sheet("Validation Rules")
+                ws_val_rules.append(["Rule ID", "Name", "Severity", "Status", "Affected Rows", "Description", "Columns", "Constraint"])
+                
+                config_rules_lookup = {}
+                if val_config and "rules" in val_config:
+                    for rule in val_config["rules"]:
+                        config_rules_lookup[rule.get("rule_id")] = rule
+                
+                for result in val_report.get("validation_results", []):
+                    rule_id = result.get("rule_id")
+                    config_rule = config_rules_lookup.get(rule_id, {})
+                    severity = result.get("severity", "warning")
+                    raw_passed = result.get("passed", False)
+                    status = "PASS" if raw_passed else ("FAIL" if severity == "error" else "WARN")
+                    affected_count = len(result.get("affected_rows", []))
+                    
+                    ws_val_rules.append([
+                        rule_id,
+                        config_rule.get("name", ""),
+                        severity.upper(),
+                        status,
+                        affected_count,
+                        config_rule.get("description", ""),
+                        ", ".join(config_rule.get("columns", [])),
+                        _humanize_constraint(config_rule.get("python_expression", ""))
+                    ])
+                
+                # Sheet 12: Validation by Column
+                ws_val_cols = wb.create_sheet("Validation By Column")
+                ws_val_cols.append(["Column", "Total Rules", "Errors Failed", "Warnings", "Status", "Rule IDs"])
+                
+                column_to_rules = {}
+                for result in val_report.get("validation_results", []):
+                    rule_id = result.get("rule_id")
+                    config_rule = config_rules_lookup.get(rule_id, {})
+                    for col in config_rule.get("columns", []):
+                        if col not in column_to_rules:
+                            column_to_rules[col] = []
+                        column_to_rules[col].append({
+                            "rule_id": rule_id,
+                            "severity": result.get("severity", "warning"),
+                            "passed": result.get("passed", False)
+                        })
+                
+                for col in sorted(column_to_rules.keys()):
+                    rules = column_to_rules[col]
+                    error_fails = sum(1 for r in rules if r["severity"] == "error" and not r["passed"])
+                    warnings = sum(1 for r in rules if r["severity"] == "warning" and not r["passed"])
+                    status = "FAIL" if error_fails > 0 else ("WARN" if warnings > 0 else "PASS")
+                    rule_ids = ", ".join(r["rule_id"] for r in rules)
+                    ws_val_cols.append([col, len(rules), error_fails, warnings, status, rule_ids])
+                
+                # Sheet 13: Row Flags with Success Rate
+                if os.path.exists(row_flags_path):
+                    ws_row_flags = wb.create_sheet("Row Validation Flags")
+                    import csv
+                    with open(row_flags_path, "r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        rows_data = list(reader)
+                    
+                    if rows_data:
+                        flag_cols = [k for k in rows_data[0].keys() if k != "row_index"]
+                        headers = ["Row", "Passed", "Failed", "Success Rate"] + flag_cols
+                        ws_row_flags.append(headers)
+                        
+                        for row_data in rows_data:
+                            row_idx = row_data.get("row_index", "")
+                            passed = sum(1 for k in flag_cols if str(row_data.get(k, "")).lower() in ("true", "1"))
+                            failed = sum(1 for k in flag_cols if str(row_data.get(k, "")).lower() in ("false", "0"))
+                            total = passed + failed
+                            success_rate = f"{(passed / total * 100):.1f}%" if total > 0 else "N/A"
+                            
+                            row_values = [row_idx, passed, failed, success_rate]
+                            for k in flag_cols:
+                                val = row_data.get(k, "")
+                                if str(val).lower() == "true":
+                                    row_values.append("PASS")
+                                elif str(val).lower() == "false":
+                                    row_values.append("FAIL")
+                                else:
+                                    row_values.append(val)
+                            ws_row_flags.append(row_values)
+            except Exception as e:
+                ws_val_err = wb.create_sheet("Validation Error")
+                ws_val_err.append([f"Error loading validation data: {e}"])
+        
         # Save Excel to ZIP
         excel_buffer = io.BytesIO()
         wb.save(excel_buffer)
@@ -4325,6 +5747,58 @@ def export_run_zip(run_id):
         except Exception as e:
             # Add error note if PDF generation fails
             zf.writestr("pdf_report_error.txt", f"Failed to generate PDF report: {e}")
+        
+        # Generate and add Validation PDF report (if validation exists)
+        if os.path.exists(validation_report_path):
+            try:
+                from report_generator import generate_validation_report_pdf
+                import tempfile
+                
+                # Load required data for validation PDF
+                with open(validation_report_path, "r", encoding="utf-8") as f:
+                    val_report_data = json.load(f)
+                
+                val_config_data = None
+                if os.path.exists(validation_config_path):
+                    with open(validation_config_path, "r", encoding="utf-8") as f:
+                        val_config_data = json.load(f)
+                
+                # Load extracted data
+                extracted_for_pdf = []
+                global_json_for_pdf = os.path.join(output_dir, "global_data.json")
+                if os.path.exists(global_json_for_pdf):
+                    with open(global_json_for_pdf, "r", encoding="utf-8") as f:
+                        extracted_for_pdf = json.load(f)
+                        if not isinstance(extracted_for_pdf, list):
+                            extracted_for_pdf = [extracted_for_pdf] if extracted_for_pdf else []
+                
+                # Load schema fields
+                schema_fields_for_pdf = None
+                schema_mapping_for_pdf = os.path.join(output_dir, "schema_mapping.json")
+                if os.path.exists(schema_mapping_for_pdf):
+                    with open(schema_mapping_for_pdf, "r", encoding="utf-8") as f:
+                        sm = json.load(f)
+                        if 'fields' in sm:
+                            schema_fields_for_pdf = sm['fields']
+                        elif 'fieldDefs' in sm:
+                            schema_fields_for_pdf = [fd.get('name') for fd in sm['fieldDefs'] if fd.get('name')]
+                
+                val_pdf_path = os.path.join(tempfile.gettempdir(), f"validation_report_{run_id}.pdf")
+                generate_validation_report_pdf(
+                    run_data=run_data,
+                    extracted_data=extracted_for_pdf,
+                    validation_report=val_report_data,
+                    validation_config=val_config_data,
+                    output_path=val_pdf_path,
+                    schema_fields=schema_fields_for_pdf
+                )
+                
+                if os.path.exists(val_pdf_path):
+                    with open(val_pdf_path, 'rb') as vpf:
+                        zf.writestr("validation_report.pdf", vpf.read())
+                    os.remove(val_pdf_path)
+            except Exception as e:
+                zf.writestr("validation_pdf_error.txt", f"Failed to generate validation PDF report: {e}")
     
     zip_buffer.seek(0)
     
@@ -4823,10 +6297,40 @@ def run_sources_list(run_id):
     sql += " ORDER BY created_at DESC"
 
     cur.execute(sql, params)
+    source_rows = cur.fetchall()
+    
+    # Get run output_dir to find metadata files
+    cur.execute("SELECT output_dir FROM runs WHERE id = ?", (run_id,))
+    run_info = cur.fetchone()
+    output_dir = run_info["output_dir"] if run_info else None
+    
     rows = []
-    for r in cur.fetchall():
+    for r in source_rows:
         d = to_camel_dict(dict(r))
         d["pdfDownloadUrl"] = f"/files/{d.get('pdfFileId')}/download" if d.get("pdfFileId") else None
+        
+        # Try to load source metadata from extraction output
+        if output_dir:
+            title = d.get("title") or ""
+            # Try to find metadata file by title (PDF filename without extension)
+            if title:
+                base_name = os.path.splitext(title)[0]
+                metadata_path = os.path.join(output_dir, "sources", f"{base_name}_metadata.json")
+                if os.path.isfile(metadata_path):
+                    try:
+                        with open(metadata_path, 'r', encoding='utf-8') as f:
+                            metadata = json.load(f)
+                        d["rowCount"] = metadata.get("row_count")
+                        d["rowCountLogic"] = metadata.get("row_count_logic")
+                        d["rowCountReasoning"] = metadata.get("row_count_reasoning")
+                        d["rowCountCandidates"] = metadata.get("all_candidates")
+                        d["rejectionReason"] = metadata.get("rejection_reason")
+                        d["extractedRows"] = metadata.get("extracted_rows")
+                        d["rowCountMismatch"] = metadata.get("row_count_mismatch", False)
+                        d["expectedRowCount"] = metadata.get("expected_row_count")
+                    except Exception:
+                        pass
+        
         rows.append(d)
     conn.close()
     return jsonify(paginate(rows, page, page_size))

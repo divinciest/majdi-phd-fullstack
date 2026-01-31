@@ -62,7 +62,7 @@ Write a concise rejection comment explaining why this paper's extraction failed 
         response = call_openai(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            use_cache=False
+            use_cache=True
         )
         return response['choices'][0]['message']['content'].strip()
     except Exception as e:
@@ -82,7 +82,8 @@ def extract_with_retries(
     use_cache: bool = True,
     cache_write_only: bool = False,
     generate_rejection: bool = True,
-    pdf_text: str = ""
+    pdf_text: str = "",
+    retry_for_cached_empty_list: bool = True
 ) -> tuple:
     """
     Execute extraction with retry loop and validation feedback
@@ -100,6 +101,7 @@ def extract_with_retries(
         use_cache: Whether to use caching
         generate_rejection: Whether to generate rejection comment on final failure
         pdf_text: Raw PDF text for rejection comment context
+        retry_for_cached_empty_list: Whether to retry when cached response returns empty list
     
     Returns:
         Tuple of (entries, rejection_comment or None)
@@ -125,7 +127,7 @@ def extract_with_retries(
             response = llm_call_fn(
                 system_prompt, 
                 user_prompt, 
-                use_cache=(use_cache and attempt == 0),
+                use_cache=use_cache,
                 cache_write_only=cache_write_only
             )
         except Exception as e:
@@ -168,6 +170,18 @@ def extract_with_retries(
         
         print(f"      → Extracted {len(entries)} entries")
 
+        if len(entries) == 0 and retry_for_cached_empty_list and attempt < max_retries:
+            consecutive_empty += 1
+            consecutive_failures += 1
+            print(f"      → Empty result from cached response, retrying with cache bypass...")
+            user_prompt = (
+                initial_prompt
+                + "\n\nNote: Your previous response produced 0 entries. "
+                + "You MUST extract at least one complete row if any relevant data exists. "
+                + "Do not return empty arrays. Return ONLY valid JSON." 
+            )
+            continue
+        
         if (not validation_config_path) and max_retries > 0 and attempt < max_retries:
             if len(entries) == 0:
                 consecutive_empty += 1

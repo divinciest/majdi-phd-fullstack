@@ -136,6 +136,17 @@ export type SchemaMappingResponse = {
   mapping: SchemaMapping | null;
 };
 
+export type CacheFlags = {
+  surya_read?: boolean;
+  surya_write?: boolean;
+  llm_read?: boolean;
+  llm_write?: boolean;
+  schema_read?: boolean;
+  schema_write?: boolean;
+  validation_read?: boolean;
+  validation_write?: boolean;
+};
+
 export type CreateRunPayload = {
   pdfsZip: File;
   excelSchema: File;
@@ -146,6 +157,20 @@ export type CreateRunPayload = {
   validationEnabled?: boolean;
   validationMaxRetries?: number;
   enableRowCounting?: boolean;
+  cacheFlags?: CacheFlags;
+};
+
+export type ValidationRule = {
+  ruleId: string;
+  name: string;
+  passed: boolean;  // Effective pass (warnings always pass)
+  rawPassed: boolean;  // Original pass/fail for display
+  severity: string;
+  description?: string;
+  columns?: string[];
+  constraint?: string;
+  details: Record<string, any>;
+  affectedRows?: number[];
 };
 
 export type ValidationResult = {
@@ -159,16 +184,69 @@ export type ValidationResult = {
     totalRules: number;
     enabledRules: number;
   };
-  rules?: Array<{
-    ruleId: string;
-    name: string;
-    passed: boolean;
-    severity: string;
-    details: Record<string, any>;
-  }>;
+  rules?: ValidationRule[];
   generatedConfig?: Record<string, any>;
   rowFlags?: Array<Record<string, any>>;
   rowFlagsTotal?: number;
+  validationPrompt?: string;
+};
+
+export type CacheEvent = {
+  type: "hit" | "miss" | "skip";
+  provider: string;
+  details: string;
+  source: string;
+  line: number;
+  raw: string;
+};
+
+export type CacheProviderStats = {
+  hits: number;
+  misses: number;
+  skips: number;
+  total: number;
+  hitRate: number;
+};
+
+export type CacheStatsResponse = {
+  runId: string;
+  events: CacheEvent[];
+  summary: {
+    totalHits: number;
+    totalMisses: number;
+    totalSkips: number;
+    byProvider: Record<string, CacheProviderStats>;
+  };
+  total: number;
+};
+
+export type ApiCall = {
+  provider: string;
+  model: string;
+  durationMs: number;
+  source: string;
+  line: number;
+};
+
+export type ApiProviderStats = {
+  calls: number;
+  totalTimeMs: number;
+  avgTimeMs: number;
+  minTimeMs: number;
+  maxTimeMs: number;
+  models: Record<string, { calls: number; totalTimeMs: number; avgTimeMs: number }>;
+};
+
+export type ApiAnalyticsResponse = {
+  runId: string;
+  calls: ApiCall[];
+  summary: {
+    totalCalls: number;
+    totalTimeMs: number;
+    avgTimeMs: number;
+    byProvider: Record<string, ApiProviderStats>;
+  };
+  total: number;
 };
 
 export const RunsAPI = {
@@ -250,6 +328,9 @@ export const RunsAPI = {
     form.append("validationEnabled", String(payload.validationEnabled ?? false));
     form.append("validationMaxRetries", String(payload.validationMaxRetries ?? 3));
     form.append("enableRowCounting", String(payload.enableRowCounting ?? false));
+    if (payload.cacheFlags) {
+      form.append("cacheFlags", JSON.stringify(payload.cacheFlags));
+    }
 
     const token = localStorage.getItem("cretextract_token");
     const headers: Record<string, string> = {};
@@ -359,4 +440,51 @@ export const RunsAPI = {
   exportZip: (id: string) => http<{ url: string; filename: string; exportId: number }>(`/runs/${id}/export-zip`, {
     method: "POST",
   }),
+
+  /** Upload validation prompt for an existing run (post-extraction) */
+  uploadValidationPrompt: async (id: string, validationPrompt: File, maxRetries: number = 3): Promise<{
+    success: boolean;
+    message: string;
+    validationPromptFileId: string;
+    validationEnabled: boolean;
+    validationMaxRetries: number;
+  }> => {
+    const form = new FormData();
+    form.append("validationPrompt", validationPrompt);
+    form.append("validationMaxRetries", String(maxRetries));
+    
+    const token = localStorage.getItem("cretextract_token");
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    
+    const res = await fetch(`${API_BASE_URL}/runs/${id}/validation/upload`, {
+      method: "POST",
+      body: form,
+      headers,
+      credentials: "include",
+    });
+    
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `Upload failed: ${res.status}`);
+    }
+    
+    return res.json();
+  },
+
+  /** Run validation on extracted data without re-extracting */
+  runValidation: (id: string) => http<{ success: boolean; message: string; runId: string }>(`/runs/${id}/validation/run`, {
+    method: "POST",
+  }),
+
+  /** Re-run validation logic using existing config (no LLM regeneration) */
+  rerunValidation: (id: string) => http<{ success: boolean; message: string; totalRows: number; acceptedRows: number; passRate: number }>(`/runs/${id}/validation/rerun`, {
+    method: "POST",
+  }),
+
+  /** Get cache statistics for a run */
+  getCacheStats: (id: string) => http<CacheStatsResponse>(`/runs/${id}/cache`),
+
+  /** Get API call analytics for a run */
+  getApiAnalytics: (id: string) => http<ApiAnalyticsResponse>(`/runs/${id}/api-analytics`),
 };

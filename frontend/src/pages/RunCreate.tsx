@@ -109,6 +109,18 @@ export default function RunCreate() {
   const [excelSchema, setExcelSchema] = useState<File | null>(null);
   const [enableRowCounting, setEnableRowCounting] = useState(false);
   
+  // Cache control flags
+  const [cacheFlags, setCacheFlags] = useState({
+    surya_read: true,
+    surya_write: true,
+    llm_read: true,
+    llm_write: true,
+    schema_read: true,
+    schema_write: true,
+    validation_read: true,
+    validation_write: true,
+  });
+  
   // Prompt files (replaces textarea)
   const [extractionPromptFile, setExtractionPromptFile] = useState<File | null>(null);
   const [validationPromptFile, setValidationPromptFile] = useState<File | null>(null);
@@ -148,6 +160,7 @@ export default function RunCreate() {
         validationEnabled: !!validationPromptFile,
         validationMaxRetries,
         enableRowCounting,
+        cacheFlags,
       });
 
       toast.success(`Run created: ${run.name} (${run.sourcesCount} sources)`);
@@ -395,6 +408,50 @@ export default function RunCreate() {
                       />
                       <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
                     </label>
+                  </div>
+
+                  {/* Cache Control */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-base">Cache Control</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Control read/write caching per API class for debugging or fresh runs.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 rounded-lg border bg-muted/20">
+                      {[
+                        { key: "surya", label: "PDF Conversion" },
+                        { key: "llm", label: "LLM Extraction" },
+                        { key: "schema", label: "Schema Inference" },
+                        { key: "validation", label: "Validation" },
+                      ].map(({ key, label }) => (
+                        <div key={key} className="space-y-2">
+                          <span className="text-xs font-medium">{label}</span>
+                          <div className="flex gap-2">
+                            <label className="flex items-center gap-1 text-xs cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="h-3 w-3"
+                                checked={cacheFlags[`${key}_read` as keyof typeof cacheFlags]}
+                                onChange={(e) => setCacheFlags(prev => ({ ...prev, [`${key}_read`]: e.target.checked }))}
+                              />
+                              Read
+                            </label>
+                            <label className="flex items-center gap-1 text-xs cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="h-3 w-3"
+                                checked={cacheFlags[`${key}_write` as keyof typeof cacheFlags]}
+                                onChange={(e) => setCacheFlags(prev => ({ ...prev, [`${key}_write`]: e.target.checked }))}
+                              />
+                              Write
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
 

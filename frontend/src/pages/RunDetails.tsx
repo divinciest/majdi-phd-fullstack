@@ -33,7 +33,7 @@ import {
   Archive,
 } from "lucide-react";
 import { WorkflowVisualization } from "@/components/workflow/WorkflowVisualization";
-import { RunsAPI, Run, LogsResponse, EngineStatus, IPCMetadata, EngineLogsResponse, RunProgress, SchemaMapping, RunExtractedDataResponse, RunInspectionResponse, ValidationResult } from "@/features/runs/api";
+import { RunsAPI, Run, LogsResponse, EngineStatus, IPCMetadata, EngineLogsResponse, RunProgress, SchemaMapping, RunExtractedDataResponse, RunInspectionResponse, ValidationResult, CacheStatsResponse, ApiAnalyticsResponse, CacheEvent, ApiCall } from "@/features/runs/api";
 import { SourcesAPI, type Source, type SourcePreview } from "@/features/sources/api";
 import { API_BASE_URL } from "@/lib/http";
 import {
@@ -197,22 +197,83 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [runningValidation, setRunningValidation] = useState(false);
+  const [rerunningValidation, setRerunningValidation] = useState(false);
+  const [validationPromptFile, setValidationPromptFile] = useState<File | null>(null);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchValidation = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await RunsAPI.getValidation(runId);
+      setValidation(result);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load validation results");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchValidation = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const result = await RunsAPI.getValidation(runId);
-        setValidation(result);
-      } catch (err: any) {
-        setError(err?.message || "Failed to load validation results");
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchValidation();
   }, [runId]);
+
+  const handleUploadAndRunValidation = async () => {
+    if (!validationPromptFile) {
+      toast({ title: "Error", description: "Please select a validation prompt file", variant: "destructive" });
+      return;
+    }
+    
+    setUploading(true);
+    setRunningValidation(true);
+    try {
+      // Step 1: Upload the validation prompt
+      await RunsAPI.uploadValidationPrompt(runId, validationPromptFile);
+      toast({ title: "Prompt Uploaded", description: "Validation prompt uploaded. Starting validation process..." });
+      
+      // Step 2: Run validation (spawns extract.py --validation-only)
+      await RunsAPI.runValidation(runId);
+      toast({ title: "Validation Started", description: "Validation process started. Check Logs tab for progress." });
+      
+      setValidationPromptFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      
+      // Poll for results more aggressively since it's a subprocess
+      const pollInterval = setInterval(() => {
+        fetchValidation().then(() => {
+          // Stop polling if we have results
+          if (validation && validation.summary) {
+            clearInterval(pollInterval);
+          }
+        });
+      }, 5000);
+      
+      // Stop polling after 2 minutes max
+      setTimeout(() => clearInterval(pollInterval), 120000);
+      
+    } catch (err: any) {
+      toast({ title: "Validation Failed", description: err?.message || "Failed to run validation", variant: "destructive" });
+    } finally {
+      setUploading(false);
+      setRunningValidation(false);
+    }
+  };
+
+  const handleRerunValidation = async () => {
+    setRerunningValidation(true);
+    try {
+      const result = await RunsAPI.rerunValidation(runId);
+      toast({ title: "Success", description: result.message });
+      await fetchValidation();
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Failed to re-run validation", variant: "destructive" });
+    } finally {
+      setRerunningValidation(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -239,12 +300,40 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
   if (!validation?.exists) {
     return (
       <Card>
-        <CardContent className="py-8 text-center">
-          <CheckCircle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-          <p className="text-muted-foreground">{validation?.message || "Validation was not enabled for this run"}</p>
-          <p className="text-xs text-muted-foreground mt-2">
-            Enable validation by uploading a validation prompt when creating a run
-          </p>
+        <CardContent className="py-8 space-y-6">
+          <div className="text-center">
+            <CheckCircle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+            <p className="text-muted-foreground">{validation?.message || "Validation was not enabled for this run"}</p>
+          </div>
+          
+          {/* Post-extraction validation upload */}
+          <div className="border-t pt-6">
+            <h3 className="text-sm font-medium mb-3">Run Validation Post-Extraction</h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              Upload a validation prompt to enable validation on the extracted data.
+            </p>
+            
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".txt"
+                  onChange={(e) => setValidationPromptFile(e.target.files?.[0] || null)}
+                  className="flex-1 text-sm file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                />
+              </div>
+              
+              <Button 
+                onClick={handleUploadAndRunValidation} 
+                disabled={!validationPromptFile || uploading || runningValidation}
+                size="sm"
+              >
+                {(uploading || runningValidation) ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}
+                {uploading ? "Uploading..." : runningValidation ? "Running..." : "Upload & Run Validation"}
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     );
@@ -253,14 +342,61 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
   const passRate = validation.summary?.overallPassRate ?? 0;
   const passRatePercent = Math.round(passRate * 100);
 
+  const handleDownloadValidationReport = (format: 'pdf' | 'excel') => {
+    window.open(`${API_BASE_URL}/runs/${runId}/validation/report?format=${format}`, '_blank');
+    setShowDownloadModal(false);
+  };
+
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2">
           <CheckCircle className="h-5 w-5" />
           Validation Results
         </CardTitle>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleRerunValidation} disabled={rerunningValidation}>
+            {rerunningValidation ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Re-run
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowDownloadModal(true)}>
+            <Download className="h-4 w-4 mr-2" />
+            Download
+          </Button>
+        </div>
       </CardHeader>
+      
+      {/* Download Format Modal */}
+      <Dialog open={showDownloadModal} onOpenChange={setShowDownloadModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Download Validation Report</DialogTitle>
+            <DialogDescription>
+              Choose the format for your validation report. PDF includes formatted tables, Excel allows further analysis.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-4">
+            <Button 
+              variant="outline" 
+              className="h-24 flex flex-col items-center justify-center gap-2"
+              onClick={() => handleDownloadValidationReport('pdf')}
+            >
+              <FileText className="h-8 w-8" />
+              <span className="font-medium">PDF Report</span>
+              <span className="text-xs text-muted-foreground">Formatted document</span>
+            </Button>
+            <Button 
+              variant="outline" 
+              className="h-24 flex flex-col items-center justify-center gap-2"
+              onClick={() => handleDownloadValidationReport('excel')}
+            >
+              <Database className="h-8 w-8" />
+              <span className="font-medium">Excel Report</span>
+              <span className="text-xs text-muted-foreground">Multiple sheets</span>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <CardContent className="space-y-6">
         {/* Summary Section */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -292,91 +428,276 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
           </div>
         </div>
 
-        {/* Rules Summary */}
-        {validation.rules && validation.rules.length > 0 && (
-          <div className="border rounded-lg">
-            <div className="px-4 py-3 border-b bg-muted/50">
-              <h3 className="font-semibold text-sm">Validation Rules ({validation.rules.length})</h3>
+        {/* Column-Centric Constraints View */}
+        {validation.rules && validation.rules.length > 0 && (() => {
+          // Build column -> rules mapping
+          const columnToRules: Record<string, typeof validation.rules> = {};
+          validation.rules.forEach((rule) => {
+            (rule.columns || []).forEach((col) => {
+              if (!columnToRules[col]) columnToRules[col] = [];
+              columnToRules[col].push(rule);
+            });
+          });
+          const sortedColumns = Object.keys(columnToRules).sort();
+          
+          return (
+            <div className="border rounded-lg">
+              <div className="px-4 py-3 border-b bg-muted/50">
+                <h3 className="font-semibold text-sm">Constraints by Column ({sortedColumns.length} columns)</h3>
+                <p className="text-xs text-muted-foreground mt-1">View which validation rules apply to each column</p>
+              </div>
+              <ScrollArea className="max-h-[500px]">
+                <div className="divide-y">
+                  {sortedColumns.map((column) => {
+                    const rules = columnToRules[column];
+                    // Only errors that fail are true failures
+                    const errorFailCount = rules.filter(r => r.severity === "error" && !r.rawPassed).length;
+                    const warningCount = rules.filter(r => r.severity === "warning" && !r.rawPassed).length;
+                    
+                    return (
+                      <Collapsible key={column}>
+                        <CollapsibleTrigger className="w-full">
+                          <div className={`p-3 flex items-center justify-between hover:bg-muted/50 transition-colors ${errorFailCount > 0 ? "bg-red-50/30 dark:bg-red-950/10" : ""}`}>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary" className="font-mono text-xs">{column}</Badge>
+                              <span className="text-xs text-muted-foreground">
+                                {rules.length} rule{rules.length !== 1 ? "s" : ""}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {errorFailCount > 0 && (
+                                <Badge variant="destructive" className="text-xs">{errorFailCount} error{errorFailCount !== 1 ? "s" : ""}</Badge>
+                              )}
+                              {warningCount > 0 && (
+                                <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-400">{warningCount} warning{warningCount !== 1 ? "s" : ""}</Badge>
+                              )}
+                              {errorFailCount === 0 && warningCount === 0 && (
+                                <Badge variant="default" className="text-xs bg-green-600">All passed</Badge>
+                              )}
+                              {errorFailCount === 0 && warningCount > 0 && (
+                                <Badge variant="default" className="text-xs bg-green-600">Passed</Badge>
+                              )}
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                          </div>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="border-t bg-muted/20">
+                            {rules.map((rule) => {
+                              const isError = rule.severity === "error";
+                              const isFailed = !rule.rawPassed;
+                              const affectedCount = rule.affectedRows?.length || 0;
+                              
+                              return (
+                                <div key={rule.ruleId} className={`px-4 py-2 border-b last:border-b-0 ${isError && isFailed ? "bg-red-50/50 dark:bg-red-950/10" : isFailed ? "bg-yellow-50/50 dark:bg-yellow-950/10" : ""}`}>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="font-mono text-xs text-muted-foreground">{rule.ruleId}</span>
+                                    {isError ? (
+                                      <Badge variant={rule.rawPassed ? "default" : "destructive"} className="text-xs">
+                                        {rule.rawPassed ? "PASS" : "FAIL"}
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="outline" className={`text-xs ${rule.rawPassed ? "" : "text-yellow-600 border-yellow-400"}`}>
+                                        {rule.rawPassed ? "OK" : "WARN"}
+                                      </Badge>
+                                    )}
+                                    <Badge variant="outline" className="text-xs">
+                                      {rule.severity}
+                                    </Badge>
+                                    {affectedCount > 0 && (
+                                      <span className="text-xs text-muted-foreground">
+                                        ({affectedCount} row{affectedCount !== 1 ? "s" : ""})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs font-medium">{rule.name}</p>
+                                  {rule.description && (
+                                    <p className="text-xs text-muted-foreground mt-1">{rule.description}</p>
+                                  )}
+                                  {rule.columns && rule.columns.length > 1 && (
+                                    <div className="flex items-center gap-1 mt-2 flex-wrap">
+                                      <span className="text-xs text-muted-foreground">Also involves:</span>
+                                      {rule.columns.filter(c => c !== column).map((col) => (
+                                        <Badge key={col} variant="outline" className="text-xs font-mono">{col}</Badge>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
             </div>
-            <ScrollArea className="max-h-[300px]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[100px]">Rule ID</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="w-[100px]">Status</TableHead>
-                    <TableHead className="w-[100px]">Severity</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {validation.rules.map((rule) => (
-                    <TableRow key={rule.ruleId}>
-                      <TableCell className="font-mono text-xs">{rule.ruleId}</TableCell>
-                      <TableCell className="text-sm">{rule.name}</TableCell>
-                      <TableCell>
-                        <Badge variant={rule.passed ? "default" : "destructive"} className="text-xs">
-                          {rule.passed ? "PASS" : "FAIL"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">
-                          {rule.severity}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-          </div>
-        )}
+          );
+        })()}
 
-        {/* Row Flags Preview */}
-        {validation.rowFlags && validation.rowFlags.length > 0 && (
+        {/* Rules Summary (by Rule) */}
+        {validation.rules && validation.rules.length > 0 && (
           <Collapsible>
             <CollapsibleTrigger asChild>
               <Button variant="outline" className="w-full">
                 <ChevronDown className="h-4 w-4 mr-2" />
-                View Row-Level Flags ({validation.rowFlagsTotal} rows)
+                View All Rules ({validation.rules.length})
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-4">
               <div className="border rounded-lg">
-                <ScrollArea className="max-h-[400px]">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[60px]">Row</TableHead>
-                        {Object.keys(validation.rowFlags[0] || {}).filter(k => k !== "row_index").slice(0, 6).map((key) => (
-                          <TableHead key={key} className="text-xs">{key}</TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {validation.rowFlags.slice(0, 50).map((row, idx) => (
-                        <TableRow key={idx}>
-                          <TableCell className="font-mono text-xs">{row.row_index ?? idx + 1}</TableCell>
-                          {Object.entries(row).filter(([k]) => k !== "row_index").slice(0, 6).map(([key, value]) => (
-                            <TableCell key={key} className="text-xs">
-                              {typeof value === "boolean" ? (
-                                <Badge variant={value ? "default" : "destructive"} className="text-xs">
-                                  {value ? "✓" : "✗"}
+                <ScrollArea className="max-h-[500px]">
+                  <div className="divide-y">
+                    {validation.rules.map((rule) => {
+                      const isError = rule.severity === "error";
+                      const isFailed = !rule.rawPassed;
+                      const affectedCount = rule.affectedRows?.length || 0;
+                      
+                      return (
+                        <div key={rule.ruleId} className={`p-4 ${isError && isFailed ? "bg-red-50/50 dark:bg-red-950/10" : isFailed ? "bg-yellow-50/30 dark:bg-yellow-950/10" : ""}`}>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-mono text-xs text-muted-foreground">{rule.ruleId}</span>
+                                {isError ? (
+                                  <Badge variant={rule.rawPassed ? "default" : "destructive"} className="text-xs">
+                                    {rule.rawPassed ? "PASS" : "FAIL"}
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className={`text-xs ${rule.rawPassed ? "" : "text-yellow-600 border-yellow-400"}`}>
+                                    {rule.rawPassed ? "OK" : "WARN"}
+                                  </Badge>
+                                )}
+                                <Badge variant="outline" className="text-xs">
+                                  {rule.severity}
                                 </Badge>
-                              ) : (
-                                String(value).substring(0, 30)
+                                {affectedCount > 0 && (
+                                  <span className="text-xs text-muted-foreground">
+                                    ({affectedCount} row{affectedCount !== 1 ? "s" : ""} affected)
+                                  </span>
+                                )}
+                              </div>
+                              <h4 className="font-medium text-sm">{rule.name}</h4>
+                              {rule.description && (
+                                <p className="text-xs text-muted-foreground mt-1">{rule.description}</p>
                               )}
-                            </TableCell>
+                              {rule.columns && rule.columns.length > 0 && (
+                                <div className="flex items-center gap-1 mt-2 flex-wrap">
+                                  <span className="text-xs text-muted-foreground">Columns:</span>
+                                  {rule.columns.map((col) => (
+                                    <Badge key={col} variant="secondary" className="text-xs font-mono">
+                                      {col}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                              {rule.constraint && (
+                                <div className="mt-2 p-2 bg-muted/50 rounded text-xs font-mono overflow-x-auto">
+                                  <span className="text-muted-foreground">Expression: </span>
+                                  <code className="break-all">{rule.constraint}</code>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+
+        {/* Row Flags Preview */}
+        {validation.rowFlags && validation.rowFlags.length > 0 && (() => {
+          // Get all flag columns (boolean columns that aren't row_index)
+          const flagColumns = Object.keys(validation.rowFlags[0] || {}).filter(k => 
+            k !== "row_index" && typeof validation.rowFlags![0][k] === "boolean"
+          );
+          
+          return (
+            <Collapsible>
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" className="w-full">
+                  <ChevronDown className="h-4 w-4 mr-2" />
+                  View Row-Level Flags ({validation.rowFlagsTotal} rows)
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-4">
+                <div className="border rounded-lg">
+                  <ScrollArea className="max-h-[400px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[60px]">Row</TableHead>
+                          <TableHead className="w-[100px]">Status</TableHead>
+                          {flagColumns.slice(0, 5).map((key) => (
+                            <TableHead key={key} className="text-xs">{key.replace(/_/g, ' ')}</TableHead>
                           ))}
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-                {(validation.rowFlagsTotal ?? 0) > 50 && (
-                  <div className="px-4 py-2 border-t text-xs text-muted-foreground text-center">
-                    Showing first 50 of {validation.rowFlagsTotal} rows
-                  </div>
-                )}
+                      </TableHeader>
+                      <TableBody>
+                        {validation.rowFlags.slice(0, 50).map((row, idx) => {
+                          // Count passed/failed flags for this row
+                          const passedCount = flagColumns.filter(k => row[k] === true).length;
+                          const failedCount = flagColumns.filter(k => row[k] === false).length;
+                          const totalFlags = flagColumns.length;
+                          
+                          return (
+                            <TableRow key={idx}>
+                              <TableCell className="font-mono text-xs">{row.row_index ?? idx + 1}</TableCell>
+                              <TableCell className="text-xs">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-green-600 font-medium">{passedCount}</span>
+                                  <span className="text-muted-foreground">/</span>
+                                  <span className={failedCount > 0 ? "text-red-600 font-medium" : "text-muted-foreground"}>{totalFlags}</span>
+                                  {failedCount === 0 && <CheckCircle className="h-3 w-3 text-green-600 ml-1" />}
+                                </div>
+                              </TableCell>
+                              {flagColumns.slice(0, 5).map((key) => (
+                                <TableCell key={key} className="text-xs">
+                                  {typeof row[key] === "boolean" ? (
+                                    <Badge variant={row[key] ? "default" : "destructive"} className="text-xs">
+                                      {row[key] ? "✓" : "✗"}
+                                    </Badge>
+                                  ) : (
+                                    String(row[key]).substring(0, 30)
+                                  )}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                  {(validation.rowFlagsTotal ?? 0) > 50 && (
+                    <div className="px-4 py-2 border-t text-xs text-muted-foreground text-center">
+                      Showing first 50 of {validation.rowFlagsTotal} rows
+                    </div>
+                  )}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          );
+        })()}
+
+        {/* Validation Prompt Review */}
+        {validation.validationPrompt && (
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button variant="outline" className="w-full">
+                <ChevronDown className="h-4 w-4 mr-2" />
+                View Validation Prompt
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-4">
+              <div className="border rounded-lg p-4 bg-muted/50">
+                <pre className="text-sm whitespace-pre-wrap font-mono">
+                  {validation.validationPrompt}
+                </pre>
               </div>
             </CollapsibleContent>
           </Collapsible>
@@ -400,6 +721,273 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
             </CollapsibleContent>
           </Collapsible>
         )}
+      </CardContent>
+    </Card>
+  );
+};
+
+// Cache Statistics Tab Component
+const CacheStatsTab = ({ runId }: { runId: string }) => {
+  const [cacheStats, setCacheStats] = useState<CacheStatsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedCacheEvent, setSelectedCacheEvent] = useState<CacheEvent | null>(null);
+
+  const fetchCacheStats = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await RunsAPI.getCacheStats(runId);
+      setCacheStats(result);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load cache statistics");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCacheStats();
+  }, [runId]);
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center">
+          <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2" />
+          <p className="text-muted-foreground">Loading cache statistics...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center">
+          <AlertCircle className="h-6 w-6 text-destructive mx-auto mb-2" />
+          <p className="text-destructive">{error}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!cacheStats || cacheStats.total === 0) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center">
+          <Archive className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+          <p className="text-muted-foreground">No cache events recorded for this run</p>
+          <p className="text-xs text-muted-foreground mt-2">Cache events will appear here as extraction progresses</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={fetchCacheStats}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const { summary, events } = cacheStats;
+  const providers = Object.entries(summary.byProvider);
+  const totalOps = summary.totalHits + summary.totalMisses + summary.totalSkips;
+  const overallHitRate = totalOps > 0 ? Math.round((summary.totalHits / totalOps) * 100) : 0;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="flex items-center gap-2">
+          <Archive className="h-5 w-5" />
+          Cache Statistics
+        </CardTitle>
+        <Button variant="outline" size="sm" onClick={fetchCacheStats}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Overall Summary */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="border rounded-lg p-4 bg-muted/50">
+            <div className="text-xs text-muted-foreground mb-1">Overall Hit Rate</div>
+            <div className="text-2xl font-bold">
+              <span className={overallHitRate >= 80 ? "text-green-600" : overallHitRate >= 50 ? "text-yellow-600" : "text-red-600"}>
+                {overallHitRate}%
+              </span>
+            </div>
+            <div className="w-full bg-muted rounded-full h-2 mt-2">
+              <div 
+                className={`h-2 rounded-full ${overallHitRate >= 80 ? "bg-green-500" : overallHitRate >= 50 ? "bg-yellow-500" : "bg-red-500"}`}
+                style={{ width: `${overallHitRate}%` }}
+              />
+            </div>
+          </div>
+          <div className="border rounded-lg p-4 bg-green-50 dark:bg-green-950/20">
+            <div className="text-xs text-muted-foreground mb-1">Cache Hits</div>
+            <div className="text-2xl font-bold text-green-600">{summary.totalHits}</div>
+          </div>
+          <div className="border rounded-lg p-4 bg-red-50 dark:bg-red-950/20">
+            <div className="text-xs text-muted-foreground mb-1">Cache Misses</div>
+            <div className="text-2xl font-bold text-red-600">{summary.totalMisses}</div>
+          </div>
+          <div className="border rounded-lg p-4 bg-yellow-50 dark:bg-yellow-950/20">
+            <div className="text-xs text-muted-foreground mb-1">Cache Skips</div>
+            <div className="text-2xl font-bold text-yellow-600">{summary.totalSkips}</div>
+          </div>
+        </div>
+
+        {/* Per-Provider Stats */}
+        {providers.length > 0 && (
+          <div className="border rounded-lg">
+            <div className="px-4 py-3 border-b bg-muted/50">
+              <h3 className="font-semibold text-sm">Cache by Provider ({providers.length} providers)</h3>
+            </div>
+            <div className="divide-y">
+              {providers.map(([provider, stats]) => (
+                <div key={provider} className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Badge variant="secondary" className="font-mono text-xs">{provider}</Badge>
+                    <span className="text-sm text-muted-foreground">{stats.total} operations</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Hits:</span>
+                      <Badge variant="default" className="bg-green-600 text-xs">{stats.hits}</Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Misses:</span>
+                      <Badge variant="destructive" className="text-xs">{stats.misses}</Badge>
+                    </div>
+                    {stats.skips > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Skips:</span>
+                        <Badge variant="outline" className="text-yellow-600 border-yellow-400 text-xs">{stats.skips}</Badge>
+                      </div>
+                    )}
+                    <div className="w-20 text-right">
+                      <span className={`text-sm font-medium ${stats.hitRate >= 80 ? "text-green-600" : stats.hitRate >= 50 ? "text-yellow-600" : "text-red-600"}`}>
+                        {stats.hitRate}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Event Log */}
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <Button variant="outline" className="w-full">
+              <ChevronDown className="h-4 w-4 mr-2" />
+              View All Cache Events ({events.length})
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-4">
+            <div className="border rounded-lg overflow-hidden">
+              <ScrollArea className="h-[400px]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[60px]">#</TableHead>
+                      <TableHead className="w-[80px]">Type</TableHead>
+                      <TableHead className="w-[100px]">Provider</TableHead>
+                      <TableHead>Details</TableHead>
+                      <TableHead className="w-[60px]"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {events.map((event, idx) => (
+                      <TableRow 
+                        key={idx} 
+                        className={`cursor-pointer hover:bg-muted/50 ${
+                          event.type === "hit" ? "bg-green-50/30 dark:bg-green-950/10" :
+                          event.type === "miss" ? "bg-red-50/30 dark:bg-red-950/10" :
+                          "bg-yellow-50/30 dark:bg-yellow-950/10"
+                        }`}
+                        onClick={() => setSelectedCacheEvent(event)}
+                      >
+                        <TableCell className="font-mono text-xs">{idx + 1}</TableCell>
+                        <TableCell>
+                          <Badge 
+                            variant={event.type === "hit" ? "default" : event.type === "miss" ? "destructive" : "outline"}
+                            className={`text-xs ${event.type === "hit" ? "bg-green-600" : event.type === "skip" ? "text-yellow-600 border-yellow-400" : ""}`}
+                          >
+                            {event.type.toUpperCase()}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="font-mono text-xs">{event.provider}</Badge>
+                        </TableCell>
+                        <TableCell className="text-xs font-mono truncate max-w-[400px]" title={event.details}>
+                          {event.details}
+                        </TableCell>
+                        <TableCell className="w-[60px]">
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                            <Search className="h-3 w-3" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+
+        {/* Cache Event Inspection Dialog */}
+        <Dialog open={!!selectedCacheEvent} onOpenChange={(open) => !open && setSelectedCacheEvent(null)}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Archive className="h-5 w-5" />
+                Cache Event Details
+              </DialogTitle>
+              <DialogDescription>
+                Inspect the cache event details and raw log entry
+              </DialogDescription>
+            </DialogHeader>
+            {selectedCacheEvent && (
+              <div className="space-y-4 overflow-y-auto flex-1">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="border rounded-lg p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Type</div>
+                    <Badge 
+                      variant={selectedCacheEvent.type === "hit" ? "default" : selectedCacheEvent.type === "miss" ? "destructive" : "outline"}
+                      className={selectedCacheEvent.type === "hit" ? "bg-green-600" : selectedCacheEvent.type === "skip" ? "text-yellow-600 border-yellow-400" : ""}
+                    >
+                      {selectedCacheEvent.type.toUpperCase()}
+                    </Badge>
+                  </div>
+                  <div className="border rounded-lg p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Provider</div>
+                    <Badge variant="secondary" className="font-mono">{selectedCacheEvent.provider}</Badge>
+                  </div>
+                  <div className="border rounded-lg p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Source File</div>
+                    <span className="text-sm font-mono">{selectedCacheEvent.source}</span>
+                  </div>
+                  <div className="border rounded-lg p-3">
+                    <div className="text-xs text-muted-foreground mb-1">Line Number</div>
+                    <span className="text-sm font-mono">{selectedCacheEvent.line}</span>
+                  </div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Details</div>
+                  <p className="text-sm font-mono break-all">{selectedCacheEvent.details}</p>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Raw Log Entry</div>
+                  <ScrollArea className="h-[120px]">
+                    <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-muted/50 p-2 rounded">{selectedCacheEvent.raw}</pre>
+                  </ScrollArea>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
@@ -508,6 +1096,9 @@ export default function RunDetails() {
   const [ipcMetadata, setIpcMetadata] = useState<IPCMetadata | null>(null);
   const [extractedData, setExtractedData] = useState<RunExtractedDataResponse | null>(null);
   const [inspection, setInspection] = useState<RunInspectionResponse | null>(null);
+  const [apiAnalytics, setApiAnalytics] = useState<ApiAnalyticsResponse | null>(null);
+  const [apiAnalyticsLoading, setApiAnalyticsLoading] = useState(false);
+  const [selectedApiCall, setSelectedApiCall] = useState<ApiCall | null>(null);
 
   const [runSources, setRunSources] = useState<Source[]>([]);
   const [runSourcesLoading, setRunSourcesLoading] = useState(false);
@@ -605,6 +1196,19 @@ export default function RunDetails() {
       setEngineStatus(null);
     } finally {
       setStatusLoading(false);
+    }
+  };
+
+  const fetchApiAnalytics = async () => {
+    if (!id) return;
+    setApiAnalyticsLoading(true);
+    try {
+      const data = await RunsAPI.getApiAnalytics(id);
+      setApiAnalytics(data);
+    } catch (err: any) {
+      setApiAnalytics(null);
+    } finally {
+      setApiAnalyticsLoading(false);
     }
   };
 
@@ -780,6 +1384,10 @@ export default function RunDetails() {
   }, [id]);
 
   useEffect(() => {
+    fetchApiAnalytics();
+  }, [id]);
+
+  useEffect(() => {
     if (!autoRefresh || !id) return;
     const interval = setInterval(() => {
       fetchEngineStatus();
@@ -788,6 +1396,7 @@ export default function RunDetails() {
       fetchExtractedData();
       fetchProgress();
       fetchRun();
+      fetchApiAnalytics();
     }, 3000);
     return () => clearInterval(interval);
   }, [autoRefresh, id]);
@@ -1249,7 +1858,7 @@ export default function RunDetails() {
       {/* Tabs */}
       <div className="px-6 pb-6">
         <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-8 lg:grid-cols-8">
+          <TabsList className="grid w-full grid-cols-10 lg:grid-cols-10">
             <TabsTrigger value="overview">
               <Settings className="h-4 w-4 mr-2" />
               Overview
@@ -1270,6 +1879,10 @@ export default function RunDetails() {
               <Link className="h-4 w-4 mr-2" />
               Sources
             </TabsTrigger>
+            <TabsTrigger value="schema">
+              <FileText className="h-4 w-4 mr-2" />
+              Schema
+            </TabsTrigger>
             <TabsTrigger value="data">
               <Database className="h-4 w-4 mr-2" />
               Extracted Data
@@ -1281,6 +1894,10 @@ export default function RunDetails() {
             <TabsTrigger value="validation">
               <CheckCircle className="h-4 w-4 mr-2" />
               Validation
+            </TabsTrigger>
+            <TabsTrigger value="cache">
+              <Archive className="h-4 w-4 mr-2" />
+              Cache
             </TabsTrigger>
           </TabsList>
 
@@ -1561,6 +2178,228 @@ export default function RunDetails() {
                 )}
               </CardContent>
             </Card>
+
+            {/* API Analytics Section */}
+            <Card className="mt-4">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5" />
+                    API Call Analytics
+                  </CardTitle>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={fetchApiAnalytics}
+                    disabled={apiAnalyticsLoading}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${apiAnalyticsLoading ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {apiAnalytics && apiAnalytics.total > 0 ? (
+                  <div className="space-y-4">
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="border rounded-lg p-4 bg-muted/50">
+                        <div className="text-xs text-muted-foreground mb-1">Total API Calls</div>
+                        <div className="text-2xl font-bold">{apiAnalytics.summary.totalCalls}</div>
+                      </div>
+                      <div className="border rounded-lg p-4 bg-muted/50">
+                        <div className="text-xs text-muted-foreground mb-1">Total Time</div>
+                        <div className="text-2xl font-bold">
+                          {apiAnalytics.summary.totalTimeMs >= 60000 
+                            ? `${(apiAnalytics.summary.totalTimeMs / 60000).toFixed(1)}m`
+                            : apiAnalytics.summary.totalTimeMs >= 1000
+                            ? `${(apiAnalytics.summary.totalTimeMs / 1000).toFixed(1)}s`
+                            : `${apiAnalytics.summary.totalTimeMs}ms`}
+                        </div>
+                      </div>
+                      <div className="border rounded-lg p-4 bg-muted/50">
+                        <div className="text-xs text-muted-foreground mb-1">Avg Response Time</div>
+                        <div className="text-2xl font-bold">
+                          {apiAnalytics.summary.avgTimeMs >= 1000
+                            ? `${(apiAnalytics.summary.avgTimeMs / 1000).toFixed(1)}s`
+                            : `${apiAnalytics.summary.avgTimeMs}ms`}
+                        </div>
+                      </div>
+                      <div className="border rounded-lg p-4 bg-muted/50">
+                        <div className="text-xs text-muted-foreground mb-1">Providers Used</div>
+                        <div className="text-2xl font-bold">{Object.keys(apiAnalytics.summary.byProvider).length}</div>
+                      </div>
+                    </div>
+
+                    {/* Per-Provider Stats */}
+                    {Object.entries(apiAnalytics.summary.byProvider).length > 0 && (
+                      <div className="border rounded-lg">
+                        <div className="px-4 py-3 border-b bg-muted/50">
+                          <h3 className="font-semibold text-sm">Performance by Provider</h3>
+                        </div>
+                        <div className="divide-y">
+                          {Object.entries(apiAnalytics.summary.byProvider).map(([provider, stats]) => (
+                            <div key={provider} className="p-4">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-3">
+                                  <Badge variant="secondary" className="font-mono text-xs">{provider}</Badge>
+                                  <span className="text-sm text-muted-foreground">{stats.calls} calls</span>
+                                </div>
+                                <div className="flex items-center gap-4 text-sm">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">Avg:</span>
+                                    <span className="font-medium">{stats.avgTimeMs >= 1000 ? `${(stats.avgTimeMs / 1000).toFixed(1)}s` : `${stats.avgTimeMs}ms`}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">Min:</span>
+                                    <span className="text-green-600">{stats.minTimeMs >= 1000 ? `${(stats.minTimeMs / 1000).toFixed(1)}s` : `${stats.minTimeMs}ms`}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">Max:</span>
+                                    <span className="text-red-600">{stats.maxTimeMs >= 1000 ? `${(stats.maxTimeMs / 1000).toFixed(1)}s` : `${stats.maxTimeMs}ms`}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">Total:</span>
+                                    <span className="font-medium">
+                                      {stats.totalTimeMs >= 60000 
+                                        ? `${(stats.totalTimeMs / 60000).toFixed(1)}m`
+                                        : stats.totalTimeMs >= 1000
+                                        ? `${(stats.totalTimeMs / 1000).toFixed(1)}s`
+                                        : `${stats.totalTimeMs}ms`}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              {/* Model breakdown */}
+                              {Object.keys(stats.models).length > 0 && (
+                                <div className="mt-2 pl-4 border-l-2 border-muted">
+                                  <div className="flex flex-wrap gap-2">
+                                    {Object.entries(stats.models).map(([model, modelStats]) => (
+                                      <Badge key={model} variant="outline" className="text-xs">
+                                        {model}: {modelStats.calls} calls, avg {modelStats.avgTimeMs >= 1000 ? `${(modelStats.avgTimeMs / 1000).toFixed(1)}s` : `${modelStats.avgTimeMs}ms`}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Individual API Calls List */}
+                    {apiAnalytics.calls && apiAnalytics.calls.length > 0 && (
+                      <Collapsible>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="outline" className="w-full">
+                            <ChevronDown className="h-4 w-4 mr-2" />
+                            View All API Calls ({apiAnalytics.calls.length})
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-4">
+                          <div className="border rounded-lg overflow-hidden">
+                            <ScrollArea className="h-[400px]">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead className="w-[60px]">#</TableHead>
+                                    <TableHead className="w-[100px]">Provider</TableHead>
+                                    <TableHead className="w-[180px]">Model</TableHead>
+                                    <TableHead className="w-[100px]">Duration</TableHead>
+                                    <TableHead>Source</TableHead>
+                                    <TableHead className="w-[60px]"></TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {apiAnalytics.calls.map((call, idx) => (
+                                    <TableRow 
+                                      key={idx} 
+                                      className="cursor-pointer hover:bg-muted/50"
+                                      onClick={() => setSelectedApiCall(call)}
+                                    >
+                                      <TableCell className="font-mono text-xs">{idx + 1}</TableCell>
+                                      <TableCell>
+                                        <Badge variant="secondary" className="font-mono text-xs">{call.provider}</Badge>
+                                      </TableCell>
+                                      <TableCell className="text-xs font-mono">{call.model}</TableCell>
+                                      <TableCell className="text-xs">
+                                        <span className={call.durationMs >= 5000 ? "text-red-600" : call.durationMs >= 2000 ? "text-yellow-600" : "text-green-600"}>
+                                          {call.durationMs >= 1000 ? `${(call.durationMs / 1000).toFixed(1)}s` : `${call.durationMs}ms`}
+                                        </span>
+                                      </TableCell>
+                                      <TableCell className="text-xs font-mono truncate max-w-[200px]" title={`${call.source}:${call.line}`}>
+                                        {call.source}:{call.line}
+                                      </TableCell>
+                                      <TableCell className="w-[60px]">
+                                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                                          <Search className="h-3 w-3" />
+                                        </Button>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </ScrollArea>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No API calls recorded yet</p>
+                    <p className="text-xs mt-2">API call timing will appear here as extraction progresses</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* API Call Inspection Dialog */}
+            <Dialog open={!!selectedApiCall} onOpenChange={(open) => !open && setSelectedApiCall(null)}>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5" />
+                    API Call Details
+                  </DialogTitle>
+                  <DialogDescription>
+                    Inspect the API call timing and metadata
+                  </DialogDescription>
+                </DialogHeader>
+                {selectedApiCall && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="border rounded-lg p-3">
+                        <div className="text-xs text-muted-foreground mb-1">Provider</div>
+                        <Badge variant="secondary" className="font-mono">{selectedApiCall.provider}</Badge>
+                      </div>
+                      <div className="border rounded-lg p-3">
+                        <div className="text-xs text-muted-foreground mb-1">Model</div>
+                        <span className="text-sm font-mono">{selectedApiCall.model}</span>
+                      </div>
+                      <div className="border rounded-lg p-3">
+                        <div className="text-xs text-muted-foreground mb-1">Duration</div>
+                        <span className={`text-lg font-bold ${selectedApiCall.durationMs >= 5000 ? "text-red-600" : selectedApiCall.durationMs >= 2000 ? "text-yellow-600" : "text-green-600"}`}>
+                          {selectedApiCall.durationMs >= 1000 ? `${(selectedApiCall.durationMs / 1000).toFixed(2)}s` : `${selectedApiCall.durationMs}ms`}
+                        </span>
+                      </div>
+                      <div className="border rounded-lg p-3">
+                        <div className="text-xs text-muted-foreground mb-1">Source Location</div>
+                        <span className="text-sm font-mono">{selectedApiCall.source}:{selectedApiCall.line}</span>
+                      </div>
+                    </div>
+                    <div className="border rounded-lg p-3 bg-muted/30">
+                      <div className="text-xs text-muted-foreground mb-2">Note</div>
+                      <p className="text-sm text-muted-foreground">
+                        API call input/response data is not currently logged. To enable full request/response inspection, 
+                        the extraction engine would need to be configured to log this data.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
           {/* Logs Tab */}
@@ -1793,66 +2632,153 @@ export default function RunDetails() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>URL</TableHead>
-                          <TableHead>Domain</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead>Created</TableHead>
+                          <TableHead>Source</TableHead>
+                          <TableHead>Row Count</TableHead>
+                          <TableHead>Status</TableHead>
                           <TableHead>Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {runSourcesLoading ? (
                           <TableRow>
-                            <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                            <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
                               Loading sources...
                             </TableCell>
                           </TableRow>
                         ) : runSources.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                            <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
                               No sources found for this run
                             </TableCell>
                           </TableRow>
                         ) : (
                           runSources.map((s) => (
-                            <TableRow key={s.id}>
-                              <TableCell
-                                className="max-w-[520px] truncate"
-                                title={(s.url || s.title || "") as string}
-                              >
-                                {(s.url || s.title || "") as string}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className="font-mono text-xs">
-                                  {s.domain || ""}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="secondary" className="text-xs">
-                                    {s.sourceType || "link"}
-                                  </Badge>
-                                  {s.status && (
-                                    <Badge
-                                      variant={
-                                        s.status === "READY"
-                                          ? "success"
-                                          : s.status === "FAILED"
-                                            ? "destructive"
-                                            : s.status === "PROCESSING"
-                                              ? "info"
-                                              : "warning"
-                                      }
-                                      className="text-xs"
-                                      title={s.status === "FAILED" ? (s.error || "Failed") : s.status}
-                                    >
-                                      {s.status}
+                            <TableRow 
+                              key={s.id} 
+                              className={`hover:!bg-transparent hover:ring-2 hover:ring-inset hover:ring-primary/50 ${
+                                s.rejectionReason 
+                                  ? "bg-red-50 dark:bg-red-950/20" 
+                                  : s.extractedRows != null && s.extractedRows > 0
+                                    ? "bg-green-50 dark:bg-green-950/20" 
+                                    : s.extractedRows === 0
+                                      ? "bg-yellow-50 dark:bg-yellow-950/20" 
+                                      : ""
+                              }`}
+                            >
+                              <TableCell className="max-w-[400px]">
+                                <div className="space-y-1">
+                                  <div className="font-medium truncate" title={(s.url || s.title || "") as string}>
+                                    {(s.title || s.url || "Untitled") as string}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="secondary" className="text-xs">
+                                      {s.sourceType || "link"}
                                     </Badge>
+                                    {s.domain && (
+                                      <span className="text-xs text-muted-foreground font-mono">{s.domain}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="space-y-1">
+                                  {s.rowCount != null ? (
+                                    <>
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-lg">{s.rowCount}</span>
+                                        <span className="text-xs text-muted-foreground">expected</span>
+                                        {s.extractedRows != null && (
+                                          <Badge 
+                                            variant={s.extractedRows === s.rowCount ? "success" : "warning"}
+                                            className="text-xs"
+                                          >
+                                            {s.extractedRows} extracted
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      {s.rowCountLogic && (
+                                        <Collapsible>
+                                          <CollapsibleTrigger className="flex items-center gap-1 text-xs text-blue-600 hover:underline cursor-pointer">
+                                            <ChevronDown className="h-3 w-3" />
+                                            View logic
+                                          </CollapsibleTrigger>
+                                          <CollapsibleContent className="mt-2 p-2 bg-muted/50 rounded text-xs">
+                                            <div className="space-y-2">
+                                              <div>
+                                                <span className="font-medium">Logic: </span>
+                                                {s.rowCountLogic}
+                                              </div>
+                                              {s.rowCountReasoning && (
+                                                <div>
+                                                  <span className="font-medium">Reasoning: </span>
+                                                  {s.rowCountReasoning}
+                                                </div>
+                                              )}
+                                              {s.rowCountCandidates && Object.keys(s.rowCountCandidates).length > 1 && (
+                                                <div>
+                                                  <span className="font-medium">Other candidates: </span>
+                                                  <div className="mt-1 space-y-1">
+                                                    {Object.entries(s.rowCountCandidates).map(([id, c]) => (
+                                                      <div key={id} className="text-xs text-muted-foreground">
+                                                        {id}: {c.count} rows - {c.logic}
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          </CollapsibleContent>
+                                        </Collapsible>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">—</span>
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {s.createdAt ? new Date(s.createdAt).toLocaleString() : ""}
+                              <TableCell>
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    {s.status && (
+                                      <Badge
+                                        variant={
+                                          s.status === "READY"
+                                            ? "success"
+                                            : s.status === "FAILED"
+                                              ? "destructive"
+                                              : s.status === "PROCESSING"
+                                                ? "info"
+                                                : "warning"
+                                        }
+                                        className="text-xs"
+                                        title={s.status === "FAILED" ? (s.error || "Failed") : s.status}
+                                      >
+                                        {s.status}
+                                      </Badge>
+                                    )}
+                                    {s.rejectionReason && (
+                                      <Badge variant="destructive" className="text-xs">
+                                        Rejected
+                                      </Badge>
+                                    )}
+                                    {s.rowCountMismatch && (
+                                      <Badge variant="warning" className="text-xs" title={`Expected ${s.expectedRowCount} rows, got ${s.extractedRows}`}>
+                                        Row Mismatch
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {s.rejectionReason && (
+                                    <Collapsible>
+                                      <CollapsibleTrigger className="flex items-center gap-1 text-xs text-red-600 hover:underline cursor-pointer">
+                                        <AlertCircle className="h-3 w-3" />
+                                        View rejection reason
+                                      </CollapsibleTrigger>
+                                      <CollapsibleContent className="mt-2 p-2 bg-red-50 dark:bg-red-950/30 rounded text-xs text-red-800 dark:text-red-200 max-w-md whitespace-pre-wrap">
+                                        {s.rejectionReason}
+                                      </CollapsibleContent>
+                                    </Collapsible>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-2">
@@ -1893,6 +2819,78 @@ export default function RunDetails() {
                     </Table>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Schema Tab */}
+          <TabsContent value="schema" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>Schema Definition</span>
+                  {inspection?.exists && inspection?.overall && (
+                    <span className="text-sm font-normal text-muted-foreground">
+                      Overall Extraction: {Math.round((inspection.overall.ratio || 0) * 100)}% ({inspection.overall.applicable}/{inspection.overall.total})
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {resolvedSchemaFieldDefs.length > 0 ? (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="whitespace-nowrap">Column</TableHead>
+                          <TableHead className="whitespace-nowrap">Description</TableHead>
+                          <TableHead className="whitespace-nowrap">Extraction Rate</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {resolvedSchemaFieldDefs.map((col) => {
+                          const fieldInspection = inspection?.exists && inspection?.perField?.[col.name];
+                          const ratio = fieldInspection ? Math.round((fieldInspection.ratio || 0) * 100) : null;
+                          return (
+                            <TableRow key={col.name} className="align-top">
+                              <TableCell className="text-sm font-mono whitespace-nowrap font-medium">
+                                {col.name}
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {col.description || <span className="italic text-muted-foreground/50">No description</span>}
+                              </TableCell>
+                              <TableCell className="text-sm font-mono whitespace-nowrap">
+                                {fieldInspection ? (
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-20 bg-muted rounded-full h-2">
+                                      <div 
+                                        className={`h-2 rounded-full ${ratio && ratio >= 80 ? "bg-green-500" : ratio && ratio >= 50 ? "bg-yellow-500" : "bg-red-500"}`}
+                                        style={{ width: `${ratio}%` }}
+                                      />
+                                    </div>
+                                    <span className={ratio && ratio >= 80 ? "text-green-600" : ratio && ratio >= 50 ? "text-yellow-600" : "text-red-600"}>
+                                      {ratio}%
+                                    </span>
+                                    <span className="text-muted-foreground text-xs">
+                                      ({fieldInspection.applicable}/{fieldInspection.total})
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground/50 italic">Not extracted yet</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <FileText className="h-8 w-8 mx-auto mb-2" />
+                    <p>No schema defined for this run</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -1993,47 +2991,11 @@ export default function RunDetails() {
               <CardContent>
                 {extractedData?.exists && extractedData.data.length > 0 ? (
                   <div className="space-y-4">
-                    <div className="rounded-md border overflow-x-auto">
-                      <div className="px-3 py-2 border-b text-sm font-medium flex items-center justify-between">
-                        <span>Columns</span>
-                        {inspection?.exists && inspection?.overall && (
-                          <span className="text-xs font-mono text-muted-foreground">
-                            Overall: {Math.round((inspection.overall.ratio || 0) * 100)}% ({inspection.overall.applicable}/{inspection.overall.total})
-                          </span>
-                        )}
-                      </div>
-                      <ScrollArea className="h-[220px]">
-                        <Table className="min-w-max">
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="whitespace-nowrap">Column</TableHead>
-                              <TableHead className="whitespace-nowrap">Description</TableHead>
-                              <TableHead className="whitespace-nowrap">Applicable %</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {resolvedSchemaFieldDefs.map((col) => (
-                              <TableRow key={col.name} className="align-top">
-                                <TableCell className="text-xs font-mono whitespace-nowrap">
-                                  {col.name}
-                                </TableCell>
-                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                  {col.description || ""}
-                                </TableCell>
-                                <TableCell className="text-xs font-mono whitespace-nowrap">
-                                  {inspection?.exists && inspection?.perField?.[col.name]
-                                    ? `${Math.round((inspection.perField[col.name].ratio || 0) * 100)}% (${inspection.perField[col.name].applicable}/${inspection.perField[col.name].total})`
-                                    : ""}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </ScrollArea>
-                    </div>
-
                     {/* Table View of Entries */}
                     <div className="rounded-md border">
+                      <div className="px-3 py-2 border-b text-sm font-medium bg-muted/30">
+                        Data Entries ({extractedData.count} rows)
+                      </div>
                       <div
                         ref={dataTableTopScrollRef}
                         className="overflow-x-auto border-b h-4"
@@ -2062,17 +3024,44 @@ export default function RunDetails() {
                       >
                         <div className="h-[500px] overflow-y-auto">
                           <table ref={dataTableInnerRef} className="w-max caption-bottom text-sm">
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead className="w-12 whitespace-nowrap">#</TableHead>
-                                <TableHead className="whitespace-nowrap min-w-[220px] cursor-pointer select-none" onClick={() => toggleExtractedDataSort("__source")}>Source</TableHead>
-                                {resolvedSchemaFields.map((col) => (
-                                  <TableHead key={col} className="whitespace-nowrap min-w-[260px] cursor-pointer select-none" onClick={() => toggleExtractedDataSort(col)}>
-                                    {col}
-                                  </TableHead>
-                                ))}
-                              </TableRow>
-                            </TableHeader>
+                            <thead className="sticky top-0 z-10 bg-background border-b">
+                              <tr>
+                                <th className="w-12 whitespace-nowrap px-4 py-3 text-left text-sm font-medium text-muted-foreground">#</th>
+                                <th 
+                                  className="whitespace-nowrap min-w-[220px] cursor-pointer select-none px-4 py-3 text-left text-sm font-medium text-muted-foreground hover:bg-muted/50" 
+                                  onClick={() => toggleExtractedDataSort("__source")}
+                                >
+                                  Source
+                                </th>
+                                {resolvedSchemaFields.map((col) => {
+                                  const fieldInspection = inspection?.exists && inspection?.perField?.[col];
+                                  const ratio = fieldInspection ? Math.round((fieldInspection.ratio || 0) * 100) : null;
+                                  const colDef = resolvedSchemaFieldDefs.find(f => f.name === col);
+                                  return (
+                                    <th 
+                                      key={col} 
+                                      className="whitespace-nowrap min-w-[260px] cursor-pointer select-none px-4 py-3 text-left text-sm font-medium text-muted-foreground hover:bg-muted/50 group"
+                                      onClick={() => toggleExtractedDataSort(col)}
+                                      title={colDef?.description || col}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span>{col}</span>
+                                        {ratio !== null && (
+                                          <span className={`text-xs px-1.5 py-0.5 rounded ${ratio >= 80 ? "bg-green-100 text-green-700" : ratio >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>
+                                            {ratio}%
+                                          </span>
+                                        )}
+                                        {colDef?.description && (
+                                          <span className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/60" title="Hover for description">
+                                            ℹ️
+                                          </span>
+                                        )}
+                                      </div>
+                                    </th>
+                                  );
+                                })}
+                              </tr>
+                            </thead>
                             <TableBody>
                               {extractedData.data.map((entry: any, idx: number) => (
                                 <TableRow key={idx} className="align-top">
@@ -2277,6 +3266,11 @@ export default function RunDetails() {
           {/* Validation Tab */}
           <TabsContent value="validation" className="mt-4">
             <ValidationResultsTab runId={run.id} />
+          </TabsContent>
+
+          {/* Cache Tab */}
+          <TabsContent value="cache" className="mt-4">
+            <CacheStatsTab runId={run.id} />
           </TabsContent>
         </Tabs>
       </div>

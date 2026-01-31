@@ -247,7 +247,7 @@ def fix_single_rule_with_llm(rule: dict, error: str, columns: List[str], call_ll
         response = call_llm_func(
             system_prompt="You are fixing a Python expression. Return ONLY the fixed expression, no explanation.",
             user_prompt=prompt,
-            use_cache=False
+            use_cache=True
         )
         
         if response:

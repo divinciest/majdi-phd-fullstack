@@ -178,7 +178,7 @@ Return ONLY the JSON object, nothing else."""
         response = call_openai(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            use_cache=False  # Don't cache alignment calls
+            use_cache=True
         )
         
         # Extract content from response

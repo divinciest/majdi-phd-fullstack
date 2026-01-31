@@ -13,6 +13,14 @@ export type Source = {
   createdAt?: string;
   pdfFileId?: string | null;
   pdfDownloadUrl?: string | null;
+  rowCount?: number | null;
+  rowCountLogic?: string | null;
+  rowCountReasoning?: string | null;
+  rowCountCandidates?: Record<string, { count: number; logic: string }> | null;
+  rejectionReason?: string | null;
+  extractedRows?: number | null;
+  rowCountMismatch?: boolean;
+  expectedRowCount?: number | null;
 };
 
 export type SourcePreview = {

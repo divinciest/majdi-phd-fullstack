@@ -5,6 +5,7 @@ import json
 
 from validation.column_alignment import find_best_fuzzy_match
 from llm_client import call_openai
+from missing_utils import normalize_value
 
 
 def normalize_entries(entries: list, schema_fields: list, source: str = "") -> list:
@@ -38,7 +39,7 @@ def normalize_entries(entries: list, schema_fields: list, source: str = "") -> l
                 else:
                     val = ""
                     missing.append(name)
-            rec[name] = "" if val is None else val
+            rec[name] = normalize_value(val)
 
         if missing and row_keys:
             cache_key = (tuple(sorted(missing)), tuple(sorted(row_keys)))
@@ -83,10 +84,10 @@ def normalize_entries(entries: list, schema_fields: list, source: str = "") -> l
 
             if mapping:
                 for req_field, avail_key in mapping.items():
-                    if rec.get(req_field, "") != "":
+                    if rec.get(req_field) is not None:
                         continue
                     val = row.get(avail_key, "")
-                    rec[req_field] = "" if val is None else val
+                    rec[req_field] = normalize_value(val)
         
         # Add source metadata
         rec["__source"] = source

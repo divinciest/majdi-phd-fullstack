@@ -507,6 +507,359 @@ def generate_run_report(
     return output_path
 
 
+def generate_validation_report_pdf(
+    run_data: Dict[str, Any],
+    extracted_data: List[Dict[str, Any]],
+    validation_report: Dict[str, Any],
+    validation_config: Optional[Dict[str, Any]],
+    output_path: str,
+    schema_fields: Optional[List[str]] = None
+) -> str:
+    """
+    Generate a comprehensive PDF validation report.
+    
+    Includes:
+    - Validation summary
+    - Rules by severity (errors vs warnings)
+    - Constraints by column
+    - Original extracted data
+    - Row-level validation flags
+    """
+    # Determine columns for landscape
+    num_columns = len(schema_fields) if schema_fields else 0
+    if num_columns == 0 and extracted_data:
+        sample = extracted_data[0]
+        num_columns = len([k for k in sample.keys() if k not in ('__source', '__url', 'row_accept_candidate')])
+    
+    use_landscape = num_columns > 5
+    page_size = landscape(A4) if use_landscape else A4
+    
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=page_size,
+        rightMargin=1*cm,
+        leftMargin=1*cm,
+        topMargin=1.5*cm,
+        bottomMargin=1.5*cm
+    )
+    
+    available_width = page_size[0] - 2*cm
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle(
+        'ValTitle',
+        parent=styles['Heading1'],
+        fontSize=20 if use_landscape else 24,
+        spaceAfter=20,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor('#1a1a2e')
+    )
+    
+    heading_style = ParagraphStyle(
+        'ValHeading',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceBefore=15,
+        spaceAfter=8,
+        textColor=colors.HexColor('#16213e')
+    )
+    
+    subheading_style = ParagraphStyle(
+        'ValSubheading',
+        parent=styles['Heading3'],
+        fontSize=11,
+        spaceBefore=12,
+        spaceAfter=6,
+        textColor=colors.HexColor('#0f3460')
+    )
+    
+    normal_style = ParagraphStyle(
+        'ValNormal',
+        parent=styles['Normal'],
+        fontSize=9,
+        spaceAfter=4
+    )
+    
+    small_style = ParagraphStyle(
+        'ValSmall',
+        parent=styles['Normal'],
+        fontSize=7,
+        textColor=colors.grey
+    )
+    
+    elements = []
+    
+    # Title
+    run_name = run_data.get('name', 'Extraction Run')
+    elements.append(Paragraph(f"Validation Report: {run_name}", title_style))
+    elements.append(Paragraph(
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        small_style
+    ))
+    elements.append(Spacer(1, 20))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
+    elements.append(Spacer(1, 20))
+    
+    # Section 1: Validation Summary
+    elements.append(Paragraph("1. Validation Summary", heading_style))
+    
+    val_results = validation_report.get("validation_results", [])
+    total_rules = len(val_results)
+    passed_rules = sum(1 for r in val_results if r.get("passed", False))
+    error_failures = sum(1 for r in val_results if r.get("severity") == "error" and not r.get("passed", False))
+    warning_failures = sum(1 for r in val_results if r.get("severity") == "warning" and not r.get("passed", False))
+    
+    summary_data = [
+        ["Metric", "Value"],
+        ["Total Rows", str(validation_report.get("total_rows", 0))],
+        ["Total Rules", str(total_rules)],
+        ["Passed Rules", str(passed_rules)],
+        ["Failed Rules (Errors)", str(error_failures)],
+        ["Warnings", str(warning_failures)],
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[6*cm, 10*cm])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e8e8e8')),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 20))
+    
+    # Section 2: Rules by Severity
+    elements.append(Paragraph("2. Validation Rules", heading_style))
+    
+    config_rules_lookup = {}
+    if validation_config and "rules" in validation_config:
+        for rule in validation_config["rules"]:
+            config_rules_lookup[rule.get("rule_id")] = rule
+    
+    rules_data = [["Rule ID", "Name", "Severity", "Status", "Affected Rows"]]
+    for result in val_results:
+        rule_id = result.get("rule_id", "")
+        config_rule = config_rules_lookup.get(rule_id, {})
+        severity = result.get("severity", "warning")
+        raw_passed = result.get("passed", False)
+        status = "PASS" if raw_passed else ("FAIL" if severity == "error" else "WARN")
+        affected_count = len(result.get("affected_rows", []))
+        
+        rules_data.append([
+            rule_id,
+            config_rule.get("name", "")[:40],
+            severity.upper(),
+            status,
+            str(affected_count)
+        ])
+    
+    rules_table = Table(rules_data, colWidths=[3*cm, 8*cm, 2*cm, 2*cm, 2*cm])
+    rules_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16213e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+    ]))
+    elements.append(rules_table)
+    elements.append(Spacer(1, 20))
+    
+    # Section 3: Constraints by Column with Acceptance/Refusal Rates
+    elements.append(Paragraph("3. Column Statistics", heading_style))
+    
+    # Build column-to-rules mapping
+    column_to_rules = {}
+    for result in val_results:
+        rule_id = result.get("rule_id", "")
+        config_rule = config_rules_lookup.get(rule_id, {})
+        for col in config_rule.get("columns", []):
+            if col not in column_to_rules:
+                column_to_rules[col] = []
+            column_to_rules[col].append({
+                "rule_id": rule_id,
+                "severity": result.get("severity", "warning"),
+                "passed": result.get("passed", False),
+                "affected_rows": set(result.get("affected_rows", []))
+            })
+    
+    total_rows = validation_report.get("total_rows", len(extracted_data))
+    
+    col_data = [["Column", "Rules", "Errors", "Warnings", "Affected Rows", "Accept Rate", "Status"]]
+    for col in sorted(column_to_rules.keys()):
+        rules = column_to_rules[col]
+        error_fails = sum(1 for r in rules if r["severity"] == "error" and not r["passed"])
+        warnings = sum(1 for r in rules if r["severity"] == "warning" and not r["passed"])
+        
+        # Calculate affected rows for this column (union of all rule failures)
+        affected_rows = set()
+        for r in rules:
+            if not r["passed"]:
+                affected_rows.update(r["affected_rows"])
+        
+        affected_count = len(affected_rows)
+        accept_rate = ((total_rows - affected_count) / total_rows * 100) if total_rows > 0 else 100
+        status = "FAIL" if error_fails > 0 else ("WARN" if warnings > 0 else "PASS")
+        
+        col_data.append([
+            col[:25], 
+            str(len(rules)), 
+            str(error_fails), 
+            str(warnings), 
+            str(affected_count),
+            f"{accept_rate:.1f}%",
+            status
+        ])
+    
+    col_table = Table(col_data, colWidths=[5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 2*cm, 2*cm, 1.5*cm])
+    col_table_style = [
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f3460')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+    ]
+    # Color code status column
+    for i, row in enumerate(col_data[1:], start=1):
+        status = row[-1]
+        if status == "PASS":
+            col_table_style.append(('BACKGROUND', (-1, i), (-1, i), colors.HexColor('#d4edda')))
+        elif status == "FAIL":
+            col_table_style.append(('BACKGROUND', (-1, i), (-1, i), colors.HexColor('#f8d7da')))
+        else:  # WARN
+            col_table_style.append(('BACKGROUND', (-1, i), (-1, i), colors.HexColor('#fff3cd')))
+    
+    col_table = Table(col_data, colWidths=[5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 2*cm, 2*cm, 1.5*cm])
+    col_table.setStyle(TableStyle(col_table_style))
+    elements.append(col_table)
+    
+    # Page break before data
+    elements.append(PageBreak())
+    
+    # Build set of rejected row indices (rows that failed any error-severity rule)
+    rejected_rows = set()
+    for result in val_results:
+        if result.get("severity") == "error" and not result.get("passed", False):
+            rejected_rows.update(result.get("affected_rows", []))
+    
+    accepted_count = total_rows - len(rejected_rows)
+    
+    # Section 4: Data Table with Row-Level Coloring
+    elements.append(Paragraph("4. Extracted Data with Validation Status", heading_style))
+    elements.append(Paragraph(
+        f"<b>Accepted:</b> {accepted_count} rows (green) | <b>Rejected:</b> {len(rejected_rows)} rows (red)",
+        normal_style
+    ))
+    elements.append(Spacer(1, 10))
+    
+    if extracted_data and len(extracted_data) > 0:
+        if schema_fields:
+            columns = list(schema_fields)
+        else:
+            sample = extracted_data[0]
+            columns = [k for k in sample.keys() if k not in ('__source', '__url', 'row_accept_candidate')]
+        
+        # Limit columns for readability
+        max_cols = 10 if use_landscape else 6
+        display_cols = columns[:max_cols]
+        
+        # Build table data with Status column
+        table_data = [["#", "Status", "Source"] + [_truncate_text(c, 15) for c in display_cols]]
+        
+        max_rows = 150
+        rows_to_show = min(len(extracted_data), max_rows)
+        
+        for i in range(rows_to_show):
+            entry = extracted_data[i]
+            is_rejected = i in rejected_rows
+            status = "REJECT" if is_rejected else "ACCEPT"
+            source = str(entry.get('__source', ''))[:15]
+            
+            row = [str(i + 1), status, source]
+            for col in display_cols:
+                val = entry.get(col, '')
+                row.append(_truncate_text(str(val) if val is not None else '', 20))
+            table_data.append(row)
+        
+        # Calculate column widths
+        num_cols = len(table_data[0])
+        status_width = 1.5*cm
+        num_width = 0.8*cm
+        source_width = 2*cm
+        remaining_width = available_width - status_width - num_width - source_width
+        data_col_width = remaining_width / max(1, num_cols - 3)
+        
+        col_widths = [num_width, status_width, source_width] + [data_col_width] * (num_cols - 3)
+        
+        data_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        
+        # Build style with row-level coloring
+        table_style = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16213e')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (0, 0), (1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('GRID', (0, 0), (-1, -1), 0.3, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]
+        
+        # Color each row based on acceptance status
+        green_tint = colors.HexColor('#d4edda')  # Light green for accepted
+        red_tint = colors.HexColor('#f8d7da')    # Light red for rejected
+        
+        for i in range(rows_to_show):
+            row_idx = i + 1  # +1 for header
+            is_rejected = i in rejected_rows
+            bg_color = red_tint if is_rejected else green_tint
+            table_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), bg_color))
+        
+        data_table.setStyle(TableStyle(table_style))
+        elements.append(data_table)
+        
+        if len(extracted_data) > rows_to_show:
+            elements.append(Spacer(1, 8))
+            elements.append(Paragraph(
+                f"Showing {rows_to_show} of {len(extracted_data)} total rows. Download Excel report for complete data.",
+                small_style
+            ))
+        
+        # Add column truncation note if applicable
+        if len(columns) > max_cols:
+            elements.append(Paragraph(
+                f"Showing {max_cols} of {len(columns)} columns. Download Excel report for all columns.",
+                small_style
+            ))
+    else:
+        elements.append(Paragraph("No extracted data available.", normal_style))
+    
+    # Footer
+    elements.append(Spacer(1, 30))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
+    elements.append(Spacer(1, 10))
+    elements.append(Paragraph(
+        f"Validation Report generated by CretExtract • Run ID: {run_data.get('id', 'N/A')}",
+        small_style
+    ))
+    
+    doc.build(elements)
+    return output_path
+
+
 def generate_report_from_run_dir(
     run_id: str,
     run_data: Dict[str, Any],

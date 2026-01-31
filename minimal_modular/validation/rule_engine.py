@@ -66,6 +66,28 @@ class RuleEngine:
         Returns:
             ValidationReport with results
         """
+        # === EARLY CHECK: Empty DataFrame ===
+        if df.empty or len(df.columns) == 0:
+            print("\n" + "=" * 80)
+            print("VALIDATION SKIPPED: Empty DataFrame")
+            print("=" * 80)
+            print(f"  → DataFrame has {len(df)} rows and {len(df.columns)} columns")
+            print(f"  → Cannot validate empty extraction results")
+            print("=" * 80)
+            
+            return ValidationReport(
+                config_name=self.config.name,
+                total_rows=0,
+                summary={
+                    "total_rules": len(self.config.rules),
+                    "enabled_rules": sum(1 for r in self.config.rules if r.enabled),
+                    "total_rows_validated": 0,
+                    "overall_pass_rate": 0.0,
+                    "empty_data": True,
+                    "error": "No data to validate - extraction returned empty results"
+                }
+            )
+        
         # === COLUMN ALIGNMENT (3-Tier) ===
         print("\n" + "=" * 80)
         print("COLUMN ALIGNMENT")
@@ -206,10 +228,13 @@ class RuleEngine:
         pass_mask = None
         
         # Priority 1: python_expression (new generic approach)
+        # IMPORTANT: Expressions define FAILURE conditions (True = row fails)
+        # So we invert the result to get pass_mask (True = row passes)
         if rule.python_expression:
             try:
                 from .generic_evaluator import evaluate_expression
-                pass_mask = evaluate_expression(subset, rule.python_expression, rule.columns)
+                fail_mask = evaluate_expression(subset, rule.python_expression, rule.columns)
+                pass_mask = ~fail_mask  # Invert: expression=True means FAIL, so pass=False
             except Exception as e:
                 print(f"WARNING: Rule {rule.rule_id} expression failed: {e}")
                 return ValidationResult(

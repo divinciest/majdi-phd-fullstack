@@ -18,6 +18,49 @@ CACHE_DIR = Path(__file__).parent / "cache"
 # User context for sandboxed caching
 _current_user_id: Optional[str] = None
 
+# Granular cache control flags (read/write per API class)
+_cache_flags = {
+    "surya_read": True,
+    "surya_write": True,
+    "llm_read": True,
+    "llm_write": True,
+    "schema_read": True,
+    "schema_write": True,
+    "validation_read": True,
+    "validation_write": True,
+}
+
+def set_cache_flags(
+    surya_read: bool = True, surya_write: bool = True,
+    llm_read: bool = True, llm_write: bool = True,
+    schema_read: bool = True, schema_write: bool = True,
+    validation_read: bool = True, validation_write: bool = True
+) -> None:
+    """Set granular cache control flags."""
+    global _cache_flags
+    _cache_flags = {
+        "surya_read": surya_read,
+        "surya_write": surya_write,
+        "llm_read": llm_read,
+        "llm_write": llm_write,
+        "schema_read": schema_read,
+        "schema_write": schema_write,
+        "validation_read": validation_read,
+        "validation_write": validation_write,
+    }
+
+def get_cache_flags() -> dict:
+    """Get current cache control flags."""
+    return _cache_flags.copy()
+
+def can_read_cache(cache_type: str) -> bool:
+    """Check if reading from a specific cache type is enabled."""
+    return _cache_flags.get(f"{cache_type}_read", True)
+
+def can_write_cache(cache_type: str) -> bool:
+    """Check if writing to a specific cache type is enabled."""
+    return _cache_flags.get(f"{cache_type}_write", True)
+
 def set_cache_user(user_id: Optional[str]) -> None:
     """Set current user for cache sandboxing."""
     global _current_user_id
@@ -81,6 +124,8 @@ def _content_hash(content: str) -> str:
 
 def get_surya_cache(pdf_path: str) -> Optional[str]:
     """Get cached Surya conversion result for PDF."""
+    if not can_read_cache("surya"):
+        return None
     cache_path = _ensure_cache_dir("surya")
     key = _file_bytes_hash(pdf_path)
     cache_file = cache_path / f"{key}.txt"
@@ -97,6 +142,8 @@ def get_surya_cache(pdf_path: str) -> Optional[str]:
 
 def set_surya_cache(pdf_path: str, content: str) -> None:
     """Cache Surya conversion result for PDF."""
+    if not can_write_cache("surya"):
+        return
     cache_path = _ensure_cache_dir("surya")
     key = _file_bytes_hash(pdf_path)
     cache_file = cache_path / f"{key}.txt"
@@ -130,6 +177,8 @@ def _gpt_cache_key(system_prompt: str, user_prompt: str, model: str) -> str:
 
 def get_gpt_cache(system_prompt: str, user_prompt: str, model: str) -> Optional[dict]:
     """Get cached GPT response."""
+    if not can_read_cache("llm"):
+        return None
     cache_path = _ensure_cache_dir("gpt")
     key = _gpt_cache_key(system_prompt, user_prompt, model)
     cache_file = cache_path / f"{key}.json"
@@ -146,6 +195,8 @@ def get_gpt_cache(system_prompt: str, user_prompt: str, model: str) -> Optional[
 
 def set_gpt_cache(system_prompt: str, user_prompt: str, model: str, response: dict) -> None:
     """Cache GPT response."""
+    if not can_write_cache("llm"):
+        return
     cache_path = _ensure_cache_dir("gpt")
     key = _gpt_cache_key(system_prompt, user_prompt, model)
     cache_file = cache_path / f"{key}.json"
@@ -166,6 +217,8 @@ def set_gpt_cache(system_prompt: str, user_prompt: str, model: str, response: di
 
 def get_schema_cache(excel_path: str) -> Optional[dict]:
     """Get cached schema for Excel file."""
+    if not can_read_cache("schema"):
+        return None
     cache_path = _ensure_cache_dir("schema")
     key = _file_hash(excel_path)
     cache_file = cache_path / f"{key}.json"
@@ -182,6 +235,8 @@ def get_schema_cache(excel_path: str) -> Optional[dict]:
 
 def set_schema_cache(excel_path: str, schema: dict) -> None:
     """Cache schema for Excel file."""
+    if not can_write_cache("schema"):
+        return
     cache_path = _ensure_cache_dir("schema")
     key = _file_hash(excel_path)
     cache_file = cache_path / f"{key}.json"
