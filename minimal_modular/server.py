@@ -1136,12 +1136,14 @@ def seed_default_config():
 seed_default_config()
 
 def cleanup_stale_running_tasks():
-    """Mark any 'running' tasks as 'aborted' on server startup.
+    """Mark any 'running' tasks as 'aborted' and 'validating' as 'completed' on server startup.
     
     This handles the case where the server was killed while tasks were running.
     """
     conn = get_db()
     cur = conn.cursor()
+    
+    # Mark running tasks as aborted
     cur.execute("SELECT id, name FROM runs WHERE status = 'running'")
     stale_runs = cur.fetchall()
     
@@ -1154,6 +1156,19 @@ def cleanup_stale_running_tasks():
         conn.commit()
         print(f"[STARTUP] Cleaned up {len(stale_runs)} stale running task(s)")
     
+    # Mark validating tasks as completed (validation was interrupted)
+    cur.execute("SELECT id, name FROM runs WHERE status = 'validating'")
+    validating_runs = cur.fetchall()
+    
+    if validating_runs:
+        for row in validating_runs:
+            run_id = row["id"]
+            run_name = row["name"]
+            cur.execute("UPDATE runs SET status = 'completed' WHERE id = ?", (run_id,))
+            print(f"[STARTUP] Marked validating run as completed: {run_name} ({run_id})")
+        conn.commit()
+        print(f"[STARTUP] Cleaned up {len(validating_runs)} validating task(s)")
+    
     conn.close()
 
 # Cleanup stale tasks on startup
@@ -1165,12 +1180,17 @@ cleanup_stale_running_tasks()
 
 def log_message(message: str, level: str = "INFO", run_id: str = None):
     """Log a message to DB and buffer for SSE."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    # Format timestamp as [dd/mm/yyyy -- hh:mm:ss]
+    timestamp = now.strftime("[%d/%m/%Y -- %H:%M:%S]")
+    timestamped_message = f"{timestamp} {message}"
+    
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO logs (created_at, level, message, run_id) VALUES (?, ?, ?, ?)",
-        (now, level, message, run_id)
+        (now_iso, level, timestamped_message, run_id)
     )
     conn.commit()
     log_id = cur.lastrowid
@@ -1178,7 +1198,7 @@ def log_message(message: str, level: str = "INFO", run_id: str = None):
     
     # Add to SSE buffer
     with log_buffer_lock:
-        log_buffer.append({"id": log_id, "createdAt": now, "level": level, "message": message, "runId": run_id})
+        log_buffer.append({"id": log_id, "createdAt": now_iso, "level": level, "message": timestamped_message, "runId": run_id})
         if len(log_buffer) > 1000:
             log_buffer.pop(0)
 
@@ -1555,12 +1575,15 @@ def spawn_extraction_process(run_id: str, pdfs_dir: str, excel_path: str, output
 
 
 def spawn_validation_only_process(run_id: str, pdfs_dir: str, excel_path: str, output_dir: str,
-                                   validation_prompt_path: str, user_id: str = None,
-                                   cache_flags: dict = None):
+                                   validation_prompt_path: str = None, user_id: str = None,
+                                   cache_flags: dict = None, validation_model: str = "gemini",
+                                   cache_enabled: bool = True):
     """
     Spawn extract.py with --validation-only flag.
     Skips extraction, only runs validation on existing global_data.json.
     Logs are appended to existing IPC logs.
+    
+    If validation_prompt_path is None, will use existing validation_config.json if present.
     """
     def update_run_status(run_id: str, new_status: str, error_message: str = None):
         """Helper to update run status."""
@@ -1585,9 +1608,12 @@ def spawn_validation_only_process(run_id: str, pdfs_dir: str, excel_path: str, o
             "--excel", excel_path,
             "--output-dir", output_dir,
             "--log-file-path", os.path.join(run_ipc_dir, "extraction.log"),
-            "--validation-only",
-            "--validation-text", validation_prompt_path
+            "--validation-only"
         ]
+        
+        # Add validation prompt if provided
+        if validation_prompt_path:
+            cmd.extend(["--validation-text", validation_prompt_path])
         
         # Add granular cache flags if provided
         if cache_flags:
@@ -1597,6 +1623,10 @@ def spawn_validation_only_process(run_id: str, pdfs_dir: str, excel_path: str, o
                     cli_flag = f"--cache-{flag_name.replace('_', '-')}"
                     cmd.extend([cli_flag, str(cache_flags[flag_name]).lower()])
         
+        # If cache_enabled is False, disable all cache reads
+        if not cache_enabled:
+            cmd.append("--no-cache-read")
+        
         # Set environment
         env = os.environ.copy()
         if user_id:
@@ -1604,7 +1634,10 @@ def spawn_validation_only_process(run_id: str, pdfs_dir: str, excel_path: str, o
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
         
-        log_message(f"Starting validation-only process for run {run_id[:8]}", "INFO", run_id)
+        # Set validation LLM provider via environment variable
+        env["VALIDATION_LLM_PROVIDER"] = validation_model
+        
+        log_message(f"Starting validation-only process for run {run_id[:8]} (model={validation_model}, cache={cache_enabled})", "INFO", run_id)
         
         # Update status to running (validation phase)
         update_run_status(run_id, "validating")
@@ -1653,6 +1686,45 @@ def spawn_validation_only_process(run_id: str, pdfs_dir: str, excel_path: str, o
                                 validation_rejected = len(row_results) - validation_accepted
                         except:
                             pass
+                    
+                    # Read enhanced_report.json for accepted/rejected counts if not set
+                    enhanced_report_path = os.path.join(output_dir, "validation", "enhanced_report.json")
+                    if os.path.exists(enhanced_report_path):
+                        try:
+                            with open(enhanced_report_path, "r", encoding="utf-8") as f:
+                                enhanced = json.load(f)
+                            if validation_accepted is None:
+                                validation_accepted = enhanced.get("accepted_rows", enhanced.get("total_rows", 0))
+                            if validation_rejected is None:
+                                validation_rejected = enhanced.get("rejected_rows", 0)
+                        except:
+                            pass
+                    
+                    # Also read AI report if available
+                    ai_score = None
+                    ai_summary = None
+                    ai_report_path = os.path.join(output_dir, "validation", "ai_report.json")
+                    if os.path.exists(ai_report_path):
+                        try:
+                            with open(ai_report_path, "r", encoding="utf-8") as f:
+                                ai_report = json.load(f)
+                            ai_score = ai_report.get("overall_quality_score")
+                            ai_summary = ai_report.get("summary", "")[:200]
+                            log_message(f"AI Report: score={ai_score}/100, summary={ai_summary}", "INFO", run_id)
+                        except Exception as ai_err:
+                            log_message(f"Failed to read AI report: {ai_err}", "WARNING", run_id)
+                    
+                    # Also read objective assessment if available
+                    obj_report_path = os.path.join(output_dir, "validation", "objective_assessment.json")
+                    if os.path.exists(obj_report_path):
+                        try:
+                            with open(obj_report_path, "r", encoding="utf-8") as f:
+                                obj_report = json.load(f)
+                            obj_grade = obj_report.get("data_quality_grade", "?")
+                            obj_narrative = obj_report.get("detailed_narrative", "")[:300]
+                            log_message(f"Objective Assessment: grade={obj_grade}, narrative={obj_narrative}...", "INFO", run_id)
+                        except Exception as obj_err:
+                            log_message(f"Failed to read objective assessment: {obj_err}", "WARNING", run_id)
                     
                     # Update run with validation results
                     conn = get_db()
@@ -4472,13 +4544,31 @@ def get_run_validation(run_id):
                 except Exception:
                     pass
 
+        # Read enhanced_report.json for accepted/rejected (preferred source of truth)
+        accepted_rows = row["validation_accepted_count"]
+        rejected_rows = row["validation_rejected_count"]
+        total_rows = report.get("total_rows", 0)
+        
+        enhanced_report_path = os.path.join(output_dir, "validation", "enhanced_report.json")
+        if os.path.exists(enhanced_report_path):
+            try:
+                with open(enhanced_report_path, "r", encoding="utf-8") as f:
+                    enhanced = json.load(f)
+                # Always prefer enhanced_report values as they're more accurate
+                accepted_rows = enhanced.get("accepted_rows", enhanced.get("total_rows", 0))
+                rejected_rows = enhanced.get("rejected_rows", 0)
+                if total_rows == 0:
+                    total_rows = enhanced.get("total_rows", 0)
+            except:
+                pass
+        
         return jsonify({
             "exists": True,
             "summary": {
                 "overallPassRate": row["validation_pass_rate"] or report.get("summary", {}).get("overall_pass_rate", 0),
-                "totalRows": report.get("total_rows", 0),
-                "acceptedRows": row["validation_accepted_count"],
-                "rejectedRows": row["validation_rejected_count"],
+                "totalRows": total_rows,
+                "acceptedRows": accepted_rows,
+                "rejectedRows": rejected_rows,
                 "totalRules": report.get("summary", {}).get("total_rules", 0),
                 "enabledRules": report.get("summary", {}).get("enabled_rules", 0)
             },
@@ -4796,17 +4886,79 @@ def upload_validation_prompt(run_id):
     })
 
 
+@app.route("/runs/<run_id>/validation/clear", methods=["DELETE"])
+@require_auth
+def clear_validation(run_id):
+    """Clear all validation results for a run.
+    
+    Deletes:
+    - validation/ folder and all contents
+    - validation_config.json
+    - validated_data.json
+    - validated_data.csv
+    """
+    user_id = g.current_user["id"]
+    
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, user_id, output_dir FROM runs WHERE id = ?", (run_id,))
+    row = cur.fetchone()
+    conn.close()
+    
+    if not row:
+        return jsonify({"error": "Run not found"}), 404
+    
+    if row["user_id"] != user_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    output_dir = row["output_dir"]
+    
+    import shutil
+    
+    # Delete validation folder
+    validation_dir = os.path.join(output_dir, "validation")
+    if os.path.isdir(validation_dir):
+        shutil.rmtree(validation_dir)
+        log_message(f"Deleted validation folder: {validation_dir}", "INFO", run_id)
+    
+    # Delete validation config
+    validation_config = os.path.join(output_dir, "validation_config.json")
+    if os.path.isfile(validation_config):
+        os.remove(validation_config)
+        log_message(f"Deleted validation config", "INFO", run_id)
+    
+    # Delete validated data files
+    for fname in ["validated_data.json", "validated_data.csv"]:
+        fpath = os.path.join(output_dir, fname)
+        if os.path.isfile(fpath):
+            os.remove(fpath)
+    
+    log_message("All validation results cleared", "INFO", run_id)
+    
+    return jsonify({
+        "success": True,
+        "message": "All validation results have been cleared"
+    })
+
+
 @app.route("/runs/<run_id>/validation/run", methods=["POST"])
 @require_auth
 def run_validation_only(run_id):
-    """Run validation on extracted data without re-extracting.
+    """Run full validation pipeline on extracted data.
     
     This spawns extract.py with --validation-only flag, which:
     - Skips extraction phase
     - Loads existing global_data.json
-    - Generates validation config from the uploaded prompt
-    - Runs validation and saves results
+    - Generates validation config from prompt (if provided)
+    - Runs rule-based validation
+    - Runs enhanced validation (source grounding, AI report, etc.)
+    - Generates PDF report
     - Appends logs to existing IPC logs (visible in Logs tab)
+    
+    Request (multipart/form-data):
+        validationPrompt (optional): .txt file with validation requirements
+        
+    If no prompt provided, uses existing validation_config.json or runs enhanced validation only.
     """
     user_id = g.current_user["id"]
     
@@ -4814,9 +4966,7 @@ def run_validation_only(run_id):
     cur = conn.cursor()
     cur.execute("""
         SELECT id, user_id, output_dir, pdfs_dir, status, validation_prompt_file_id, 
-               validation_enabled, validation_max_retries, schema_file_id,
-               cache_surya_read, cache_surya_write, cache_llm_read, cache_llm_write,
-               cache_schema_read, cache_schema_write, cache_validation_read, cache_validation_write
+               validation_enabled, schema_file_id
         FROM runs WHERE id = ?
     """, (run_id,))
     row = cur.fetchone()
@@ -4829,27 +4979,16 @@ def run_validation_only(run_id):
         conn.close()
         return jsonify({"error": "Forbidden"}), 403
     
+    # Only allow validation on completed runs
+    run_status = row["status"]
+    if run_status != "completed":
+        conn.close()
+        return jsonify({"error": f"Cannot validate run with status '{run_status}'. Only completed runs can be validated."}), 400
+    
     output_dir = row["output_dir"]
     pdfs_dir = row["pdfs_dir"]
     validation_prompt_file_id = row["validation_prompt_file_id"]
     schema_file_id = row["schema_file_id"]
-    
-    # Check if validation prompt exists
-    if not validation_prompt_file_id:
-        conn.close()
-        return jsonify({"error": "No validation prompt uploaded. Upload one first via /validation/upload"}), 400
-    
-    # Get validation prompt path
-    validation_prompt_path = get_file_internal_path(validation_prompt_file_id)
-    if not validation_prompt_path or not os.path.isfile(validation_prompt_path):
-        conn.close()
-        return jsonify({"error": "Validation prompt file not found"}), 400
-    
-    # Get schema file path
-    excel_path = get_file_internal_path(schema_file_id) if schema_file_id else None
-    if not excel_path or not os.path.isfile(excel_path):
-        conn.close()
-        return jsonify({"error": "Schema file not found"}), 400
     
     # Check if extracted data exists
     global_json_path = os.path.join(output_dir, "global_data.json")
@@ -4857,17 +4996,41 @@ def run_validation_only(run_id):
         conn.close()
         return jsonify({"error": "No extracted data found. Run extraction first."}), 400
     
-    # Build cache flags from run settings
-    cache_flags = {
-        "surya_read": row["cache_surya_read"] if row["cache_surya_read"] is not None else True,
-        "surya_write": row["cache_surya_write"] if row["cache_surya_write"] is not None else True,
-        "llm_read": row["cache_llm_read"] if row["cache_llm_read"] is not None else True,
-        "llm_write": row["cache_llm_write"] if row["cache_llm_write"] is not None else True,
-        "schema_read": row["cache_schema_read"] if row["cache_schema_read"] is not None else True,
-        "schema_write": row["cache_schema_write"] if row["cache_schema_write"] is not None else True,
-        "validation_read": row["cache_validation_read"] if row["cache_validation_read"] is not None else True,
-        "validation_write": row["cache_validation_write"] if row["cache_validation_write"] is not None else True,
-    }
+    # Get schema file path
+    excel_path = get_file_internal_path(schema_file_id) if schema_file_id else None
+    if not excel_path or not os.path.isfile(excel_path):
+        conn.close()
+        return jsonify({"error": "Schema file not found"}), 400
+    
+    # Handle optional validation prompt file upload
+    validation_prompt_path = None
+    
+    if "validationPrompt" in request.files:
+        prompt_file = request.files["validationPrompt"]
+        if prompt_file.filename and prompt_file.filename.lower().endswith('.txt'):
+            run_upload_dir = os.path.join(UPLOAD_FOLDER, run_id)
+            os.makedirs(run_upload_dir, exist_ok=True)
+            prompt_filename = secure_filename(prompt_file.filename)
+            validation_prompt_path = os.path.join(run_upload_dir, f"validation_prompt_{prompt_filename}")
+            prompt_file.save(validation_prompt_path)
+            
+            cur.execute("UPDATE runs SET validation_enabled = 1 WHERE id = ?", (run_id,))
+            conn.commit()
+    elif validation_prompt_file_id:
+        validation_prompt_path = get_file_internal_path(validation_prompt_file_id)
+        if validation_prompt_path and not os.path.isfile(validation_prompt_path):
+            validation_prompt_path = None
+    
+    # Check if we have either a prompt or existing config
+    validation_config_path = os.path.join(output_dir, "validation_config.json")
+    if not validation_prompt_path and not os.path.isfile(validation_config_path):
+        log_message("No validation prompt or config - will run enhanced validation only", "INFO", run_id)
+    
+    # Get model and cache settings from request
+    validation_model = request.form.get("model", "gemini")
+    cache_enabled = request.form.get("cacheEnabled", "true").lower() == "true"
+    
+    log_message(f"Validation settings: model={validation_model}, cache={cache_enabled}", "INFO", run_id)
     
     conn.close()
     
@@ -4879,14 +5042,16 @@ def run_validation_only(run_id):
         output_dir=output_dir,
         validation_prompt_path=validation_prompt_path,
         user_id=user_id,
-        cache_flags=cache_flags
+        cache_flags=None,
+        validation_model=validation_model,
+        cache_enabled=cache_enabled
     )
     
-    log_message("Validation-only process started", "INFO", run_id)
+    log_message("Full validation process started", "INFO", run_id)
     
     return jsonify({
         "success": True,
-        "message": "Validation started. Check the Logs tab for progress and Validation tab for results.",
+        "message": "Full validation started. Check the Logs tab for progress and Validation tab for results.",
         "runId": run_id
     })
 
@@ -5033,6 +5198,153 @@ def rerun_validation_logic(run_id):
     except Exception as e:
         log_message(f"Validation re-run failed: {e}", "ERROR", run_id)
         return jsonify({"error": f"Validation re-run failed: {e}"}), 500
+
+
+@app.route("/runs/<run_id>/validation/enhanced", methods=["POST"])
+@require_auth
+def run_enhanced_validation_endpoint(run_id):
+    """Run enhanced validation on extracted data.
+    
+    Runs all enhanced validation phases:
+    1. Source grounding (check values exist in PDFs)
+    2. Row count validation (expected vs actual)
+    3. Column metrics (coverage, outliers)
+    4. Error classification
+    5. AI validation report
+    
+    Can be triggered manually after extraction or re-triggered anytime.
+    """
+    user_id = g.current_user["id"]
+    
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, user_id, output_dir, pdfs_dir, schema_file_id
+        FROM runs WHERE id = ?
+    """, (run_id,))
+    row = cur.fetchone()
+    
+    if not row:
+        conn.close()
+        return jsonify({"error": "Run not found"}), 404
+    
+    if row["user_id"] != user_id:
+        conn.close()
+        return jsonify({"error": "Forbidden"}), 403
+    
+    output_dir = row["output_dir"]
+    pdfs_dir = row["pdfs_dir"]
+    schema_file_id = row["schema_file_id"]
+    conn.close()
+    
+    if not output_dir:
+        return jsonify({"error": "Run has no output directory"}), 400
+    
+    global_json_path = os.path.join(output_dir, "global_data.json")
+    if not os.path.isfile(global_json_path):
+        return jsonify({"error": "No extracted data found. Run extraction first."}), 400
+    
+    try:
+        with open(global_json_path, "r", encoding="utf-8") as f:
+            extracted_data = json.load(f)
+        
+        if not isinstance(extracted_data, list):
+            extracted_data = [extracted_data] if extracted_data else []
+        
+        schema_fields = None
+        if schema_file_id:
+            schema_path = get_file_internal_path(schema_file_id)
+            if schema_path and os.path.isfile(schema_path):
+                try:
+                    from schema_inference import infer_schema_from_excel
+                    schema_fields = infer_schema_from_excel(schema_path)
+                except:
+                    pass
+        
+        from validation.enhanced_validation import run_enhanced_validation
+        
+        log_message(f"Starting enhanced validation for run {run_id[:8]}", "INFO", run_id)
+        
+        enhanced_report = run_enhanced_validation(
+            run_id=run_id,
+            output_dir=output_dir,
+            pdfs_dir=pdfs_dir,
+            schema_fields=schema_fields,
+            extracted_data=extracted_data,
+            verbose=True
+        )
+        
+        log_message(f"Enhanced validation complete: AI Score {enhanced_report.ai_quality_score}/100", "INFO", run_id)
+        
+        return jsonify({
+            "success": True,
+            "message": f"Enhanced validation complete. AI Quality Score: {enhanced_report.ai_quality_score}/100",
+            "report": enhanced_report.to_dict()
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        log_message(f"Enhanced validation failed: {e}", "ERROR", run_id)
+        return jsonify({"error": f"Enhanced validation failed: {e}"}), 500
+
+
+@app.route("/runs/<run_id>/validation/enhanced", methods=["GET"])
+def get_enhanced_validation_report(run_id):
+    """Get enhanced validation report for a run.
+    
+    Returns the combined enhanced validation report including:
+    - Source grounding results
+    - Row count validation
+    - Column metrics
+    - Error classification
+    - AI validation report
+    """
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT output_dir FROM runs WHERE id = ?", (run_id,))
+    row = cur.fetchone()
+    conn.close()
+    
+    if not row:
+        return jsonify({"error": "Run not found"}), 404
+    
+    output_dir = row["output_dir"]
+    if not output_dir:
+        return jsonify({"error": "Run has no output directory"}), 400
+    
+    validation_dir = os.path.join(output_dir, "validation")
+    enhanced_report_path = os.path.join(validation_dir, "enhanced_report.json")
+    
+    if not os.path.isfile(enhanced_report_path):
+        return jsonify({
+            "exists": False,
+            "message": "Enhanced validation report not found. Run enhanced validation first."
+        })
+    
+    try:
+        with open(enhanced_report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+        
+        ai_report_path = os.path.join(validation_dir, "ai_report.json")
+        if os.path.isfile(ai_report_path):
+            with open(ai_report_path, "r", encoding="utf-8") as f:
+                ai_report = json.load(f)
+            report["ai_report"] = ai_report
+        
+        source_grounding_path = os.path.join(validation_dir, "source_grounding.json")
+        if os.path.isfile(source_grounding_path):
+            with open(source_grounding_path, "r", encoding="utf-8") as f:
+                source_grounding = json.load(f)
+            report["source_grounding"] = source_grounding
+        
+        return jsonify({
+            "exists": True,
+            "report": report
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to read enhanced validation report: {e}"}), 500
 
 
 @app.route("/runs/<run_id>/validated-data", methods=["GET"])

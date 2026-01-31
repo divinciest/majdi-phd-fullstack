@@ -6,12 +6,18 @@ Domain-independent: works for ANY data domain.
 Includes retry mechanism with error feedback and expression validation.
 
 ZERO TOLERANCE: All expressions must validate before use.
+
+Default provider: Uses LLM_PROVIDER from config (Gemini by default).
+Configurable via VALIDATION_LLM_PROVIDER env var.
 """
 import json
 import os
 import re
 from typing import Optional, List, Dict, Any, Tuple
 import pandas as pd
+
+from config import LLM_PROVIDER
+VALIDATION_LLM_PROVIDER = os.environ.get("VALIDATION_LLM_PROVIDER", LLM_PROVIDER)
 
 
 # ==============================================================================
@@ -413,7 +419,8 @@ Generate validation config JSON:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 use_cache=use_cache,
-                cache_write_only=cache_write_only
+                cache_write_only=cache_write_only,
+                provider=VALIDATION_LLM_PROVIDER
             )
             
             if not response:

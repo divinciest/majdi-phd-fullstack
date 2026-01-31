@@ -191,6 +191,52 @@ export type ValidationResult = {
   validationPrompt?: string;
 };
 
+export type AIIssue = {
+  study: string | null;
+  issue: string;
+  severity: string;
+  affected_rows?: number | null;
+};
+
+export type EnhancedValidationReport = {
+  exists: boolean;
+  message?: string;
+  report?: {
+    run_id: string;
+    total_rows: number;
+    total_columns: number;
+    rule_validation_pass_rate: number;
+    accepted_rows: number;
+    rejected_rows: number;
+    grounding_score: number;
+    cells_found_in_source: number;
+    cells_not_found: number;
+    row_count_accuracy: number;
+    sources_with_mismatch: number;
+    avg_coverage: number;
+    avg_outlier_rate: number;
+    total_errors: number;
+    error_breakdown: Record<string, number>;
+    ai_quality_score: number;
+    ai_summary: string;
+    ai_report?: {
+      overall_quality_score: number;
+      data_completeness: string;
+      grounding_confidence: string;
+      row_count_accuracy: string;
+      issues: AIIssue[];
+      recommendations: string[];
+      summary: string;
+    };
+    source_grounding?: {
+      grounding_score: number;
+      cells_checked: number;
+      cells_found: number;
+      cells_not_found: number;
+    };
+  };
+};
+
 export type CacheEvent = {
   type: "hit" | "miss" | "skip";
   provider: string;
@@ -482,9 +528,78 @@ export const RunsAPI = {
     method: "POST",
   }),
 
+  /** Get enhanced validation report (source grounding, AI analysis, etc.) */
+  getEnhancedValidation: (id: string) => http<EnhancedValidationReport>(`/runs/${id}/validation/enhanced`),
+
+  /** Run enhanced validation (source grounding, row count, AI report) */
+  runEnhancedValidation: (id: string) => http<{ success: boolean; message: string; report: any }>(`/runs/${id}/validation/enhanced`, {
+    method: "POST",
+  }),
+
+  /** Run full validation pipeline (config generation + rule validation + enhanced + PDF report) */
+  runFullValidation: async (
+    id: string, 
+    validationPrompt?: File,
+    model: string = "gemini",
+    cacheEnabled: boolean = true
+  ): Promise<{
+    success: boolean;
+    message: string;
+    runId: string;
+  }> => {
+    const form = new FormData();
+    if (validationPrompt) {
+      form.append("validationPrompt", validationPrompt);
+    }
+    form.append("model", model);
+    form.append("cacheEnabled", cacheEnabled ? "true" : "false");
+    
+    const token = localStorage.getItem("cretextract_token");
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    
+    const res = await fetch(`${API_BASE_URL}/runs/${id}/validation/run`, {
+      method: "POST",
+      body: form,
+      headers,
+      credentials: "include",
+    });
+    
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `Full validation failed: ${res.status}`);
+    }
+    
+    return res.json();
+  },
+
   /** Get cache statistics for a run */
   getCacheStats: (id: string) => http<CacheStatsResponse>(`/runs/${id}/cache`),
 
   /** Get API call analytics for a run */
   getApiAnalytics: (id: string) => http<ApiAnalyticsResponse>(`/runs/${id}/api-analytics`),
+
+  /** Clear all validation results for a run */
+  clearValidation: async (id: string): Promise<{ success: boolean; message: string }> => {
+    const token = localStorage.getItem("cretextract_token");
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    
+    const res = await fetch(`${API_BASE_URL}/runs/${id}/validation/clear`, {
+      method: "DELETE",
+      headers,
+      credentials: "include",
+    });
+    
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `Clear validation failed: ${res.status}`);
+    }
+    
+    return res.json();
+  },
 };

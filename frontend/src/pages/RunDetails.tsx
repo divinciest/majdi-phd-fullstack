@@ -31,9 +31,10 @@ import {
   Search,
   Globe,
   Archive,
+  Trash2,
 } from "lucide-react";
 import { WorkflowVisualization } from "@/components/workflow/WorkflowVisualization";
-import { RunsAPI, Run, LogsResponse, EngineStatus, IPCMetadata, EngineLogsResponse, RunProgress, SchemaMapping, RunExtractedDataResponse, RunInspectionResponse, ValidationResult, CacheStatsResponse, ApiAnalyticsResponse, CacheEvent, ApiCall } from "@/features/runs/api";
+import { RunsAPI, Run, LogsResponse, EngineStatus, IPCMetadata, EngineLogsResponse, RunProgress, SchemaMapping, RunExtractedDataResponse, RunInspectionResponse, ValidationResult, EnhancedValidationReport, CacheStatsResponse, ApiAnalyticsResponse, CacheEvent, ApiCall } from "@/features/runs/api";
 import { SourcesAPI, type Source, type SourcePreview } from "@/features/sources/api";
 import { API_BASE_URL } from "@/lib/http";
 import {
@@ -195,11 +196,13 @@ const JsonNode = ({ data, name, level }: { data: any; name: string; level: numbe
 // Validation Results Tab Component
 const ValidationResultsTab = ({ runId }: { runId: string }) => {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
+  const [enhancedValidation, setEnhancedValidation] = useState<EnhancedValidationReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [runningValidation, setRunningValidation] = useState(false);
   const [rerunningValidation, setRerunningValidation] = useState(false);
+  const [runningEnhanced, setRunningEnhanced] = useState(false);
   const [validationPromptFile, setValidationPromptFile] = useState<File | null>(null);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -217,8 +220,18 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
     }
   };
 
+  const fetchEnhancedValidation = async () => {
+    try {
+      const result = await RunsAPI.getEnhancedValidation(runId);
+      setEnhancedValidation(result);
+    } catch (err: any) {
+      // Silently fail - enhanced validation may not exist yet
+    }
+  };
+
   useEffect(() => {
     fetchValidation();
+    fetchEnhancedValidation();
   }, [runId]);
 
   const handleUploadAndRunValidation = async () => {
@@ -275,6 +288,89 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
     }
   };
 
+  const handleRunEnhancedValidation = async () => {
+    setRunningEnhanced(true);
+    try {
+      const result = await RunsAPI.runEnhancedValidation(runId);
+      toast({ title: "AI Analysis Complete", description: result.message });
+      await fetchEnhancedValidation();
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Failed to run AI analysis", variant: "destructive" });
+    } finally {
+      setRunningEnhanced(false);
+    }
+  };
+
+  const [runningFullValidation, setRunningFullValidation] = useState(false);
+  const [validationModel, setValidationModel] = useState<string>(() => {
+    return localStorage.getItem("validation_model") || "gemini";
+  });
+  const [validationCacheEnabled, setValidationCacheEnabled] = useState(() => {
+    const stored = localStorage.getItem("validation_cache_enabled");
+    return stored === null ? true : stored === "true";
+  });
+
+  // Persist settings to localStorage
+  useEffect(() => {
+    localStorage.setItem("validation_model", validationModel);
+  }, [validationModel]);
+
+  useEffect(() => {
+    localStorage.setItem("validation_cache_enabled", String(validationCacheEnabled));
+  }, [validationCacheEnabled]);
+
+  const handleRunFullValidation = async () => {
+    setRunningFullValidation(true);
+    try {
+      const result = await RunsAPI.runFullValidation(
+        runId, 
+        validationPromptFile || undefined,
+        validationModel,
+        validationCacheEnabled
+      );
+      toast({ 
+        title: "Validation Started", 
+        description: result.message || "Check Logs tab for progress. Click Refresh when complete."
+      });
+      
+      setValidationPromptFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      
+    } catch (err: any) {
+      toast({ title: "Validation Failed", description: err?.message || "Failed to start validation", variant: "destructive" });
+    } finally {
+      setRunningFullValidation(false);
+    }
+  };
+
+  const handleRefreshValidation = async () => {
+    setLoading(true);
+    try {
+      await fetchValidation();
+      await fetchEnhancedValidation();
+      toast({ title: "Refreshed", description: "Validation results updated" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClearValidation = async () => {
+    if (!confirm("Are you sure you want to clear all validation results? This cannot be undone.")) {
+      return;
+    }
+    setLoading(true);
+    try {
+      await RunsAPI.clearValidation(runId);
+      setValidation(null);
+      setEnhancedValidation(null);
+      toast({ title: "Cleared", description: "All validation results have been cleared" });
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Failed to clear validation", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <Card>
@@ -303,14 +399,14 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
         <CardContent className="py-8 space-y-6">
           <div className="text-center">
             <CheckCircle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-            <p className="text-muted-foreground">{validation?.message || "Validation was not enabled for this run"}</p>
+            <p className="text-muted-foreground">{validation?.message || "Validation not yet run"}</p>
           </div>
           
-          {/* Post-extraction validation upload */}
+          {/* Single-button full validation */}
           <div className="border-t pt-6">
-            <h3 className="text-sm font-medium mb-3">Run Validation Post-Extraction</h3>
+            <h3 className="text-sm font-medium mb-3">Run Full Validation</h3>
             <p className="text-xs text-muted-foreground mb-4">
-              Upload a validation prompt to enable validation on the extracted data.
+              Run complete validation pipeline: config generation (if prompt provided) → rule validation → AI analysis → PDF report.
             </p>
             
             <div className="flex flex-col gap-3">
@@ -322,15 +418,43 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
                   onChange={(e) => setValidationPromptFile(e.target.files?.[0] || null)}
                   className="flex-1 text-sm file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
                 />
+                <span className="text-xs text-muted-foreground">(optional)</span>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground">Model:</label>
+                  <select
+                    value={validationModel}
+                    onChange={(e) => setValidationModel(e.target.value)}
+                    className="text-xs border rounded px-2 py-1 bg-background"
+                  >
+                    <option value="gemini">Gemini</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="deepseek">DeepSeek</option>
+                  </select>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="validation-cache"
+                    checked={validationCacheEnabled}
+                    onChange={(e) => setValidationCacheEnabled(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  <label htmlFor="validation-cache" className="text-xs text-muted-foreground">Enable Cache</label>
+                </div>
               </div>
               
               <Button 
-                onClick={handleUploadAndRunValidation} 
-                disabled={!validationPromptFile || uploading || runningValidation}
-                size="sm"
+                onClick={handleRunFullValidation} 
+                disabled={runningFullValidation}
+                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
               >
-                {(uploading || runningValidation) ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}
-                {uploading ? "Uploading..." : runningValidation ? "Running..." : "Upload & Run Validation"}
+                {runningFullValidation ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}
+                {runningFullValidation ? "Running Full Validation..." : "Run Full Validation"}
               </Button>
             </div>
           </div>
@@ -354,14 +478,46 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
           <CheckCircle className="h-5 w-5" />
           Validation Results
         </CardTitle>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleRerunValidation} disabled={rerunningValidation}>
-            {rerunningValidation ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-            Re-run
+        <div className="flex items-center gap-3">
+          <select
+            value={validationModel}
+            onChange={(e) => setValidationModel(e.target.value)}
+            className="text-xs border rounded px-2 py-1 bg-background h-8"
+          >
+            <option value="gemini">Gemini</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="deepseek">DeepSeek</option>
+          </select>
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={validationCacheEnabled}
+              onChange={(e) => setValidationCacheEnabled(e.target.checked)}
+              className="h-3 w-3"
+            />
+            Cache
+          </label>
+          <Button 
+            size="sm" 
+            onClick={handleRunFullValidation} 
+            disabled={runningFullValidation}
+            className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+          >
+            {runningFullValidation ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Play className="h-4 w-4 mr-2" />}
+            {runningFullValidation ? "Running..." : "Re-run Full Validation"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleRefreshValidation} disabled={loading}>
+            {loading ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Refresh
           </Button>
           <Button variant="outline" size="sm" onClick={() => setShowDownloadModal(true)}>
             <Download className="h-4 w-4 mr-2" />
             Download
+          </Button>
+          <Button variant="destructive" size="sm" onClick={handleClearValidation} disabled={loading}>
+            <Trash2 className="h-4 w-4 mr-2" />
+            Clear
           </Button>
         </div>
       </CardHeader>
@@ -427,6 +583,203 @@ const ValidationResultsTab = ({ runId }: { runId: string }) => {
             <div className="text-2xl font-bold text-red-600">{validation.summary?.rejectedRows ?? "—"}</div>
           </div>
         </div>
+
+        {/* Enhanced Validation Section (AI Analysis) */}
+        {enhancedValidation?.exists && enhancedValidation.report && (
+          <div className="space-y-4">
+            {/* AI Quality Score */}
+            <div className="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-950/20 dark:to-blue-950/20">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm flex items-center gap-2">
+                  <Activity className="h-4 w-4" />
+                  AI Quality Assessment
+                </h3>
+                <Badge variant={
+                  enhancedValidation.report.ai_quality_score >= 80 ? "default" :
+                  enhancedValidation.report.ai_quality_score >= 65 ? "secondary" : "destructive"
+                } className={
+                  enhancedValidation.report.ai_quality_score >= 80 ? "bg-green-600" :
+                  enhancedValidation.report.ai_quality_score >= 65 ? "bg-yellow-600" : ""
+                }>
+                  {enhancedValidation.report.ai_quality_score >= 80 ? "High Quality" :
+                   enhancedValidation.report.ai_quality_score >= 65 ? "Usable" : "Needs Review"}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-4xl font-bold">
+                  {enhancedValidation.report.ai_quality_score}
+                  <span className="text-lg text-muted-foreground">/100</span>
+                </div>
+                <div className="flex-1">
+                  <div className="w-full bg-muted rounded-full h-3">
+                    <div 
+                      className={`h-3 rounded-full transition-all ${
+                        enhancedValidation.report.ai_quality_score >= 80 ? "bg-green-500" :
+                        enhancedValidation.report.ai_quality_score >= 65 ? "bg-yellow-500" : "bg-red-500"
+                      }`}
+                      style={{ width: `${enhancedValidation.report.ai_quality_score}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              {enhancedValidation.report.ai_summary && (
+                <p className="text-sm text-muted-foreground mt-3">{enhancedValidation.report.ai_summary}</p>
+              )}
+            </div>
+
+            {/* Objective Data Assessment */}
+            {enhancedValidation.report.objective_grade && enhancedValidation.report.objective_grade !== "?" && (
+              <div className="border rounded-lg p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Objective Data Assessment
+                  </h3>
+                  <Badge variant={
+                    enhancedValidation.report.objective_grade === "A" || enhancedValidation.report.objective_grade === "B" ? "default" :
+                    enhancedValidation.report.objective_grade === "C" ? "secondary" : "destructive"
+                  } className={`text-lg px-3 py-1 ${
+                    enhancedValidation.report.objective_grade === "A" ? "bg-green-600" :
+                    enhancedValidation.report.objective_grade === "B" ? "bg-blue-600" :
+                    enhancedValidation.report.objective_grade === "C" ? "bg-yellow-600" :
+                    enhancedValidation.report.objective_grade === "D" ? "bg-orange-600" : "bg-red-600"
+                  }`}>
+                    Grade: {enhancedValidation.report.objective_grade}
+                  </Badge>
+                </div>
+                {enhancedValidation.report.objective_narrative && (
+                  <div className="text-sm text-muted-foreground whitespace-pre-wrap">
+                    {enhancedValidation.report.objective_narrative}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Enhanced Metrics Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="border rounded-lg p-3 bg-muted/30">
+                <div className="text-xs text-muted-foreground mb-1">Source Grounding</div>
+                <div className="text-xl font-bold">
+                  {Math.round(enhancedValidation.report.grounding_score * 100)}%
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {enhancedValidation.report.cells_found_in_source} / {enhancedValidation.report.cells_found_in_source + enhancedValidation.report.cells_not_found} found
+                </div>
+              </div>
+              <div className="border rounded-lg p-3 bg-muted/30">
+                <div className="text-xs text-muted-foreground mb-1">Row Count Accuracy</div>
+                <div className="text-xl font-bold">
+                  {Math.round(enhancedValidation.report.row_count_accuracy * 100)}%
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {enhancedValidation.report.sources_with_mismatch} mismatches
+                </div>
+              </div>
+              <div className="border rounded-lg p-3 bg-muted/30">
+                <div className="text-xs text-muted-foreground mb-1">Data Coverage</div>
+                <div className="text-xl font-bold">
+                  {Math.round(enhancedValidation.report.avg_coverage * 100)}%
+                </div>
+                <div className="text-xs text-muted-foreground">avg non-null</div>
+              </div>
+              <div className="border rounded-lg p-3 bg-muted/30">
+                <div className="text-xs text-muted-foreground mb-1">Total Errors</div>
+                <div className="text-xl font-bold text-red-600">
+                  {enhancedValidation.report.total_errors}
+                </div>
+                <div className="text-xs text-muted-foreground">classified</div>
+              </div>
+            </div>
+
+            {/* AI Issues & Recommendations */}
+            {enhancedValidation.report.ai_report && (
+              <div className="grid md:grid-cols-2 gap-4">
+                {/* Issues */}
+                {enhancedValidation.report.ai_report.issues && enhancedValidation.report.ai_report.issues.length > 0 && (
+                  <div className="border rounded-lg flex flex-col">
+                    <div className="px-4 py-2 border-b bg-red-50 dark:bg-red-950/20">
+                      <h4 className="font-semibold text-sm text-red-700 dark:text-red-400">
+                        Issues Identified ({enhancedValidation.report.ai_report.issues.length})
+                      </h4>
+                    </div>
+                    <ScrollArea className="h-[200px]">
+                      <div className="p-3 space-y-2">
+                        {enhancedValidation.report.ai_report.issues.map((issue, idx) => (
+                          <div key={idx} className="flex items-start gap-2 text-sm">
+                            <AlertCircle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${
+                              issue.severity === "high" ? "text-red-500" : "text-yellow-500"
+                            }`} />
+                            <div>
+                              {issue.study && <span className="font-medium">{issue.study}: </span>}
+                              {issue.issue}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
+
+                {/* Recommendations */}
+                {enhancedValidation.report.ai_report.recommendations && enhancedValidation.report.ai_report.recommendations.length > 0 && (
+                  <div className="border rounded-lg flex flex-col">
+                    <div className="px-4 py-2 border-b bg-blue-50 dark:bg-blue-950/20">
+                      <h4 className="font-semibold text-sm text-blue-700 dark:text-blue-400">
+                        Recommendations ({enhancedValidation.report.ai_report.recommendations.length})
+                      </h4>
+                    </div>
+                    <ScrollArea className="h-[200px]">
+                      <div className="p-3 space-y-2">
+                        {enhancedValidation.report.ai_report.recommendations.map((rec, idx) => (
+                          <div key={idx} className="flex items-start gap-2 text-sm">
+                            <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0 text-blue-500" />
+                            <span>{rec}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Error Breakdown */}
+            {enhancedValidation.report.error_breakdown && Object.keys(enhancedValidation.report.error_breakdown).length > 0 && (
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" size="sm" className="w-full">
+                    <ChevronDown className="h-4 w-4 mr-2" />
+                    Error Breakdown by Type
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className="border rounded-lg divide-y">
+                    {Object.entries(enhancedValidation.report.error_breakdown)
+                      .filter(([_, count]) => count > 0)
+                      .map(([errorType, count]) => (
+                        <div key={errorType} className="flex items-center justify-between px-4 py-2">
+                          <span className="text-sm font-mono">{errorType}</span>
+                          <Badge variant="secondary">{count}</Badge>
+                        </div>
+                      ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+          </div>
+        )}
+
+        {/* No Enhanced Validation Yet */}
+        {!enhancedValidation?.exists && (
+          <div className="border rounded-lg p-4 bg-muted/30 text-center">
+            <Activity className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground mb-2">AI Analysis not yet run</p>
+            <Button variant="outline" size="sm" onClick={handleRunEnhancedValidation} disabled={runningEnhanced}>
+              {runningEnhanced ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Activity className="h-4 w-4 mr-2" />}
+              Run AI Analysis
+            </Button>
+          </div>
+        )}
 
         {/* Column-Centric Constraints View */}
         {validation.rules && validation.rules.length > 0 && (() => {

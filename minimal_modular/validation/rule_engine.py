@@ -172,6 +172,18 @@ class RuleEngine:
                 result = self._execute_row_rule(filtered_df, rule, row_flags)
                 report.all_results.append(result)
         
+        # Compute row_accept_candidate: True if row passes all error-severity rules
+        error_rule_ids = [r.rule_id for r in self.config.rules if r.severity == RuleSeverity.ERROR and r.enabled]
+        if error_rule_ids and not row_flags.empty:
+            # Get columns that exist in row_flags
+            existing_error_cols = [col for col in error_rule_ids if col in row_flags.columns]
+            if existing_error_cols:
+                row_flags['row_accept_candidate'] = row_flags[existing_error_cols].all(axis=1)
+            else:
+                row_flags['row_accept_candidate'] = True
+        else:
+            row_flags['row_accept_candidate'] = True
+        
         # Store row-level flags
         report.row_results = row_flags.to_dict('records')
         
@@ -293,10 +305,10 @@ class RuleEngine:
         if pass_mask is None:
             pass_mask = pd.Series(True, index=subset.index)
         
-        # Store result in flag column
-        if rule.flag_column:
-            row_flags.loc[mask, rule.flag_column] = False
-            row_flags.loc[mask & pass_mask, rule.flag_column] = True
+        # Store result in flag column (always store using rule_id if no flag_column specified)
+        flag_col = rule.flag_column or rule.rule_id
+        row_flags.loc[mask, flag_col] = False
+        row_flags.loc[mask & pass_mask, flag_col] = True
         
         # Compute overall result
         total_applicable = mask.sum()

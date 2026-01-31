@@ -25,6 +25,12 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime
+
+def tlog(message: str) -> None:
+    """Print message with timestamp in [dd/mm/yyyy -- hh:mm:ss] format."""
+    timestamp = datetime.now().strftime("[%d/%m/%Y -- %H:%M:%S]")
+    print(f"{timestamp} {message}", flush=True)
 
 from schema_inference import infer_schema_from_excel
 from pdf_converter import convert_pdf_to_text
@@ -88,72 +94,99 @@ def do_clear_cache():
     print("Done!")
 
 
-def run_validation_postprocess(all_entries: list, validation_config_path: str, output_dir: str, schema_fields: list):
+def run_validation_postprocess(all_entries: list, validation_config_path: str, output_dir: str, schema_fields: list, 
+                                pdfs_dir: str = None, run_id: str = None):
     """Run validation post-processing on extracted data.
     
     Single source of truth for validation logic, used by both:
     - Normal extraction flow (after extraction completes)
     - Validation-only mode (--validation-only flag)
     
+    If validation_config_path is None or doesn't exist, skips rule-based validation
+    but still runs enhanced validation (source grounding, AI report, etc.)
+    
     Returns True if validation succeeded, False otherwise.
     """
     if not all_entries:
-        print(f"[VALIDATION] Skipping validation (no data to validate)")
+        tlog(f"[VALIDATION] Skipping validation (no data to validate)")
         return False
     
-    if not validation_config_path or not os.path.isfile(validation_config_path):
-        print(f"ERROR: Validation config not found: {validation_config_path}", file=sys.stderr)
-        return False
+    import pandas as pd
+    df = pd.DataFrame(all_entries)
+    report = None
     
+    # Run rule-based validation if config exists
+    if validation_config_path and os.path.isfile(validation_config_path):
+        try:
+            from validation import load_validation_config, merge_validation_flags, create_composite_flags
+            from validation.rule_engine import RuleEngine
+            from validation.validation_utils import format_summary
+            
+            config = load_validation_config(validation_config_path)
+            tlog(f"✓ Loaded '{config.name}' ({len(config.rules)} rules)")
+            
+            engine = RuleEngine(config)
+            report = engine.validate(df)
+            tlog(f"✓ Rule-based validation complete")
+            
+            validation_dir = os.path.join(output_dir, "validation")
+            os.makedirs(validation_dir, exist_ok=True)
+            
+            with open(os.path.join(validation_dir, 'validation_report.json'), 'w', encoding='utf-8') as f:
+                json.dump(report.to_dict(), f, indent=2)
+            
+            if report.row_results:
+                pd.DataFrame(report.row_results).to_csv(os.path.join(validation_dir, 'row_flags.csv'), index=False)
+            if report.paper_results:
+                pd.DataFrame(report.paper_results).to_csv(os.path.join(validation_dir, 'paper_metrics.csv'), index=False)
+            with open(os.path.join(validation_dir, 'validation_summary.txt'), 'w', encoding='utf-8') as f:
+                f.write(format_summary(report))
+            
+            df_validated = merge_validation_flags(df, report)
+            df_validated = create_composite_flags(df_validated, config)
+            accepted_df = df_validated[df_validated.get('row_accept_candidate', True)]
+            
+            clean_json = os.path.join(output_dir, "validated_data.json")
+            clean_csv = os.path.join(output_dir, "validated_data.csv")
+            accepted_df.to_json(clean_json, orient='records', indent=2)
+            write_csv_entries(clean_csv, accepted_df.to_dict('records'), schema_fields, mode='w')
+            
+            tlog(f"Validation Results:")
+            tlog(f"  Pass Rate: {report.summary.get('overall_pass_rate', 0):.1%}")
+            tlog(f"  Accepted: {len(accepted_df)}/{len(df)} rows")
+            tlog(f"  Outputs: {validation_dir}/")
+            tlog(f"  Clean Data: {clean_json}")
+            
+        except Exception as e:
+            print(f"WARNING: Rule-based validation failed: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+    else:
+        tlog(f"[VALIDATION] No validation config - skipping rule-based validation")
+    
+    # Always run enhanced validation (source grounding, row count, column metrics, AI report)
     try:
-        import pandas as pd
-        from validation import load_validation_config, merge_validation_flags, create_composite_flags
-        from validation.rule_engine import RuleEngine
-        from validation.validation_utils import format_summary
+        from validation.enhanced_validation import run_enhanced_validation
         
-        config = load_validation_config(validation_config_path)
-        print(f"✓ Loaded '{config.name}' ({len(config.rules)} rules)")
+        effective_run_id = run_id or os.path.basename(output_dir)
         
-        df = pd.DataFrame(all_entries)
-        engine = RuleEngine(config)
-        report = engine.validate(df)
-        print(f"✓ Validation complete")
-        
-        validation_dir = os.path.join(output_dir, "validation")
-        os.makedirs(validation_dir, exist_ok=True)
-        
-        with open(os.path.join(validation_dir, 'validation_report.json'), 'w', encoding='utf-8') as f:
-            json.dump(report.to_dict(), f, indent=2)
-        
-        if report.row_results:
-            pd.DataFrame(report.row_results).to_csv(os.path.join(validation_dir, 'row_flags.csv'), index=False)
-        if report.paper_results:
-            pd.DataFrame(report.paper_results).to_csv(os.path.join(validation_dir, 'paper_metrics.csv'), index=False)
-        with open(os.path.join(validation_dir, 'validation_summary.txt'), 'w', encoding='utf-8') as f:
-            f.write(format_summary(report))
-        
-        df_validated = merge_validation_flags(df, report)
-        df_validated = create_composite_flags(df_validated, config)
-        accepted_df = df_validated[df_validated.get('row_accept_candidate', True)]
-        
-        clean_json = os.path.join(output_dir, "validated_data.json")
-        clean_csv = os.path.join(output_dir, "validated_data.csv")
-        accepted_df.to_json(clean_json, orient='records', indent=2)
-        write_csv_entries(clean_csv, accepted_df.to_dict('records'), schema_fields, mode='w')
-        
-        print(f"\nValidation Results:")
-        print(f"  Pass Rate: {report.summary.get('overall_pass_rate', 0):.1%}")
-        print(f"  Accepted: {len(accepted_df)}/{len(df)} rows")
-        print(f"  Outputs: {validation_dir}/")
-        print(f"  Clean Data: {clean_json}")
-        
-        return True
-        
-    except Exception as e:
-        print(f"ERROR during validation: {e}", file=sys.stderr)
+        tlog(f"[ENHANCED VALIDATION] Running additional validation phases...")
+        enhanced_report = run_enhanced_validation(
+            run_id=effective_run_id,
+            output_dir=output_dir,
+            pdfs_dir=pdfs_dir,
+            schema_fields=schema_fields,
+            extracted_data=all_entries,
+            validation_report=report,
+            verbose=True
+        )
+        tlog(f"✓ Enhanced validation complete (AI Score: {enhanced_report.ai_quality_score}/100)")
+    except Exception as enhanced_err:
+        print(f"WARNING: Enhanced validation failed: {enhanced_err}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-        return False
+    
+    return True
 
 
 def main():
@@ -259,7 +292,7 @@ def main():
     )
     args = parser.parse_args()
 
-    print(f"[INFO] Retries configured: {args.retries}")
+    tlog(f"[INFO] Retries configured: {args.retries}")
 
     # Setup logging if log file path provided
     log_file = None
@@ -324,7 +357,7 @@ def main():
         sys.stdout = TeeOutput(sys.__stdout__, log_file)
         sys.stderr = TeeOutput(sys.__stderr__, log_file)
         
-        print(f"\n[LOG] Logging to: {args.log_file_path}\n")
+        tlog(f"[LOG] Logging to: {args.log_file_path}")
 
     # Handle cache commands
     if args.cache_stats:
@@ -353,9 +386,9 @@ def main():
     use_cache = not args.no_cache
     cache_write_only = getattr(args, 'no_cache_read', False)
     if not use_cache:
-        print("\n[INFO] Caching disabled - all API calls will be fresh, no cache writes")
+        tlog(f"[INFO] Caching disabled - all API calls will be fresh, no cache writes")
     elif cache_write_only:
-        print("\n[INFO] Cache write-only mode - fresh API calls, results will be cached")
+        tlog(f"[INFO] Cache write-only mode - fresh API calls, results will be cached")
     
     # Initialize granular cache flags
     # If --no-cache is set, disable all; if --no-cache-read is set, disable reads only
@@ -395,18 +428,18 @@ def main():
     # 1. Load instructions (needed for schema descriptions)
     instructions = args.instructions
     if instructions and os.path.isfile(instructions):
-        print(f"      → Loading instructions from {instructions}")
+        tlog(f"      → Loading instructions from {instructions}")
         with open(instructions, "r", encoding="utf-8") as f:
             instructions = f.read()
 
     # 2. Infer schema from Excel FIRST (needed for validation config generation)
-    print(f"\n[1/4] Loading schema from {args.excel}...")
+    tlog(f"[1/4] Loading schema from {args.excel}...")
     try:
         schema = infer_schema_from_excel(args.excel, instructions=instructions or "", use_cache=use_cache)
         schema_fields = [f["name"] for f in schema.get("fields", [])]
         preview = schema_fields[:5]
         suffix = "..." if len(schema_fields) > 5 else ""
-        print(f"      → {len(schema_fields)} fields: {preview}{suffix}")
+        tlog(f"      → {len(schema_fields)} fields: {preview}{suffix}")
     except Exception as e:
         print(f"ERROR: Failed to load schema: {e}", file=sys.stderr)
         sys.exit(1)
@@ -438,7 +471,7 @@ def main():
             print(f"ERROR: Validation text file not found: {args.validation_text}", file=sys.stderr)
             sys.exit(1)
         
-        print(f"\n[0/5] Generating validation config from: {args.validation_text}")
+        tlog(f"[0/5] Generating validation config from: {args.validation_text}")
         
         from generate_validation_config import generate_validation_config
         
@@ -459,19 +492,19 @@ def main():
             )
             
             if config:
-                print(f"      → Generated {len(config.get('rules', []))} validation rules")
-                print(f"      → Saved to: {validation_config_path}")
+                tlog(f"      → Generated {len(config.get('rules', []))} validation rules")
+                tlog(f"      → Saved to: {validation_config_path}")
                 args.validation_config = validation_config_path
             else:
-                print(f"      → WARNING: Failed to generate validation config")
+                tlog(f"      → WARNING: Failed to generate validation config")
         except Exception as e:
-            print(f"      → ERROR generating validation config: {e}")
+            tlog(f"      → ERROR generating validation config: {e}")
 
     # VALIDATION-ONLY MODE: Skip extraction, load existing data, jump to validation
     if getattr(args, 'validation_only', False):
-        print(f"\n{'='*80}")
-        print(f"VALIDATION-ONLY MODE: Skipping extraction, running validation on existing data")
-        print(f"{'='*80}")
+        tlog(f"{'='*80}")
+        tlog(f"VALIDATION-ONLY MODE: Skipping extraction, running validation on existing data")
+        tlog(f"{'='*80}")
         
         if not os.path.isfile(global_json_path):
             print(f"ERROR: No extracted data found at {global_json_path}", file=sys.stderr)
@@ -481,20 +514,26 @@ def main():
         with open(global_json_path, 'r', encoding='utf-8') as f:
             all_entries = json.load(f)
         
-        print(f"✓ Loaded {len(all_entries)} existing entries from {global_json_path}")
+        tlog(f"✓ Loaded {len(all_entries)} existing entries from {global_json_path}")
         
+        # Check for existing validation config if no prompt provided
+        existing_config_path = os.path.join(args.output_dir, "validation_config.json")
         if not args.validation_config and not args.validation_text:
-            print(f"ERROR: --validation-only requires --validation-config or --validation-text", file=sys.stderr)
-            sys.exit(1)
+            if os.path.isfile(existing_config_path):
+                tlog(f"✓ Using existing validation config: {existing_config_path}")
+                args.validation_config = existing_config_path
+            else:
+                tlog(f"INFO: No validation prompt or config - running enhanced validation only")
         
         # Run validation using shared function
-        print(f"\n[VALIDATION] Running validation on {len(all_entries)} entries")
-        print("="*80)
-        run_validation_postprocess(all_entries, args.validation_config, args.output_dir, schema_fields)
-        print("="*80)
+        tlog(f"[VALIDATION] Running validation on {len(all_entries)} entries")
+        tlog("="*80)
+        run_validation_postprocess(all_entries, args.validation_config, args.output_dir, schema_fields,
+                                   pdfs_dir=args.pdfs, run_id=os.path.basename(args.output_dir))
+        tlog("="*80)
         
         show_cache_stats()
-        print("Done! (validation-only mode)")
+        tlog("Done! (validation-only mode)")
         
         if log_file:
             from datetime import datetime
@@ -843,7 +882,8 @@ def main():
     if args.validation_config and len(all_entries) > 0:
         print(f"\n[5/5] POST-PROCESSING: Data Validation")
         print("="*80)
-        run_validation_postprocess(all_entries, args.validation_config, args.output_dir, schema_fields)
+        run_validation_postprocess(all_entries, args.validation_config, args.output_dir, schema_fields,
+                                   pdfs_dir=args.pdfs, run_id=os.path.basename(args.output_dir))
         print("="*80)
     elif args.validation_config and len(all_entries) == 0:
         print(f"\n[5/5] Skipping validation (no data extracted)")
